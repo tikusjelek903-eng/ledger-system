@@ -1,23 +1,48 @@
+const currentUser = {
+  name: "Super Admin",
+  role: "superadmin"
+};
+
+const seedStores = [
+  { id: "toko-utama", name: "Toko Utama" },
+  { id: "toko-jakarta", name: "Toko Jakarta" },
+  { id: "toko-bandung", name: "Toko Bandung" }
+];
+
+let stores =
+  JSON.parse(localStorage.getItem("lpv2_stores")) || seedStores;
+
+let activeStoreId =
+  localStorage.getItem("lpv2_activeStoreId") || "all";
 const seedWallets=[
-{id:1,name:"Ledger",type:"Crypto",balance:0,color:"blue"},
-{id:2,name:"BCA",type:"Bank",balance:0,color:"green"},
-{id:3,name:"Kas",type:"Kas",balance:0,color:"orange"}
+{id:1,name:"Ledger",type:"Crypto",balance:0,color:"blue",storeId:"toko-utama"},
+  {id:2,name:"BCA",type:"Bank",balance:0,color:"green",storeId:"toko-utama"},
+  {id:3,name:"Kas",type:"Kas",balance:0,color:"orange",storeId:"toko-utama"}
 ];
 const seedTransactions=[
-{id:1,date:"2024-04-24",note:"Saldo awal",wallet:"Ledger",type:"in",amount:30000,rate:16300,reference:""},
-{id:2,date:"2024-04-24",note:"Transfer masuk",wallet:"Ledger",type:"in",amount:31336.39,rate:16300,reference:""},
-{id:3,date:"2024-04-24",note:"Transfer masuk",wallet:"BCA",type:"in",amount:7001,rate:16300,reference:""},
-{id:4,date:"2024-04-25",note:"Transfer masuk",wallet:"Ledger",type:"in",amount:9231.47,rate:16300,reference:""},
-{id:5,date:"2024-04-27",note:"Pengeluaran operasional",wallet:"Kas",type:"out",amount:30000,rate:16300,reference:""},
-{id:6,date:"2024-04-27",note:"Pengeluaran",wallet:"Kas",type:"out",amount:2000,rate:16300,reference:""},
-{id:7,date:"2024-05-01",note:"Transfer masuk",wallet:"BCA",type:"in",amount:2000,rate:16333,reference:""},
-{id:8,date:"2024-05-02",note:"Pengeluaran",wallet:"Kas",type:"out",amount:5000,rate:16333,reference:""}
+{id:1,date:"2024-04-24",note:"Saldo awal",wallet:"Ledger",type:"in",amount:30000,rate:16300,reference:"",storeId:"toko-utama"},
+{id:2,date:"2024-04-24",note:"Transfer masuk",wallet:"Ledger",type:"in",amount:31336.39,rate:16300,reference:"",storeId:"toko-utama"},
+{id:3,date:"2024-04-24",note:"Transfer masuk",wallet:"BCA",type:"in",amount:7001,rate:16300,reference:"",storeId:"toko-utama"},
+{id:4,date:"2024-04-25",note:"Transfer masuk",wallet:"Ledger",type:"in",amount:9231.47,rate:16300,reference:"",storeId:"toko-utama"},
+{id:5,date:"2024-04-27",note:"Pengeluaran operasional",wallet:"Kas",type:"out",amount:30000,rate:16300,reference:"",storeId:"toko-utama"},
+{id:6,date:"2024-04-27",note:"Pengeluaran",wallet:"Kas",type:"out",amount:2000,rate:16300,reference:"",storeId:"toko-utama"},
+{id:7,date:"2024-05-01",note:"Transfer masuk",wallet:"BCA",type:"in",amount:2000,rate:16333,reference:"",storeId:"toko-utama"},
+{id:8,date:"2024-05-02",note:"Pengeluaran",wallet:"Kas",type:"out",amount:5000,rate:16333,reference:"",storeId:"toko-utama"}
 ];
 const defaultSettings={appName:"Ledger Pro",defaultRate:16300,dateFormat:"id-ID",currency:"USD",theme:"light"};
 let wallets=JSON.parse(localStorage.getItem("lpv2_wallets"))||seedWallets;
 let transactions=JSON.parse(localStorage.getItem("lpv2_transactions"))||seedTransactions;
 let settings=JSON.parse(localStorage.getItem("lpv2_settings"))||defaultSettings;
 let editingId=null;
+wallets = wallets.map(wallet => ({
+  ...wallet,
+  storeId: wallet.storeId || "toko-utama"
+}));
+
+transactions = transactions.map(transaction => ({
+  ...transaction,
+  storeId: transaction.storeId || "toko-utama"
+}));
 
 const meta={
 dashboard:["Dashboard","Ringkasan kondisi keuangan."],
@@ -32,17 +57,109 @@ settings:["Pengaturan","Atur preferensi aplikasi."]
 function usd(v){return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(v||0))}
 function idr(v){return new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0}).format(Number(v||0))}
 function dateLabel(v){return new Date(v+"T00:00:00").toLocaleDateString(settings.dateFormat||"id-ID",{day:"2-digit",month:"short",year:"numeric"})}
-function save(){localStorage.setItem("lpv2_wallets",JSON.stringify(wallets));localStorage.setItem("lpv2_transactions",JSON.stringify(transactions));localStorage.setItem("lpv2_settings",JSON.stringify(settings))}
-function esc(s){return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;")}
+function save(){
+  localStorage.setItem("lpv2_wallets", JSON.stringify(wallets));
+  localStorage.setItem("lpv2_transactions", JSON.stringify(transactions));
+  localStorage.setItem("lpv2_settings", JSON.stringify(settings));
+  localStorage.setItem("lpv2_stores", JSON.stringify(stores));
+  localStorage.setItem("lpv2_activeStoreId", activeStoreId);
+}
+save();
 function toast(msg){const e=document.getElementById("toast");e.textContent=msg;e.classList.add("show");clearTimeout(window.tt);window.tt=setTimeout(()=>e.classList.remove("show"),2200)}
 
-function rows(){
-let balance=0;
-return [...transactions].sort((a,b)=>new Date(a.date)-new Date(b.date)||a.id-b.id).map(t=>{balance+=t.type==="in"?+t.amount:-t.amount;return {...t,balance,idrBalance:balance*t.rate}})
+function getFilteredTransactions() {
+  if (activeStoreId === "all") {
+    return transactions;
+  }
+
+  return transactions.filter(
+    transaction => transaction.storeId === activeStoreId
+  );
 }
-function walletBalance(name){return transactions.filter(t=>t.wallet===name).reduce((a,t)=>a+(t.type==="in"?+t.amount:-t.amount),0)+(wallets.find(w=>w.name===name)?.balance||0)}
-function monthly(){
-const m={};transactions.forEach(t=>{const k=t.date.slice(0,7);m[k]??={month:k,in:0,out:0,count:0};m[k].count++;m[k][t.type]+=+t.amount});return Object.values(m).sort((a,b)=>a.month.localeCompare(b.month))
+
+function getFilteredWallets() {
+  if (activeStoreId === "all") {
+    return wallets;
+  }
+
+  return wallets.filter(
+    wallet => wallet.storeId === activeStoreId
+  );
+}
+
+function getStoreName(storeId) {
+  const store = stores.find(item => item.id === storeId);
+  return store ? store.name : "Toko Utama";
+}
+
+
+function rows() {
+  let balance = 0;
+  const filteredTransactions = getFilteredTransactions();
+
+  return [...filteredTransactions]
+    .sort(
+      (a, b) =>
+        new Date(a.date) - new Date(b.date) ||
+        a.id - b.id
+    )
+    .map(t => {
+      balance += t.type === "in"
+        ? Number(t.amount)
+        : -Number(t.amount);
+
+      return {
+        ...t,
+        balance,
+        idrBalance: balance * t.rate
+      };
+    });
+}
+
+function walletBalance(name) {
+  const filteredTransactions = getFilteredTransactions();
+  const filteredWallets = getFilteredWallets();
+
+  const transactionBalance = filteredTransactions
+    .filter(t => t.wallet === name)
+    .reduce(
+      (total, t) =>
+        total +
+        (t.type === "in"
+          ? Number(t.amount)
+          : -Number(t.amount)),
+      0
+    );
+
+  const initialBalance =
+    filteredWallets.find(w => w.name === name)?.balance || 0;
+
+  return transactionBalance + initialBalance;
+}
+
+function monthly() {
+  const result = {};
+  const filteredTransactions = getFilteredTransactions();
+
+  filteredTransactions.forEach(t => {
+    const monthKey = t.date.slice(0, 7);
+
+    if (!result[monthKey]) {
+      result[monthKey] = {
+        month: monthKey,
+        in: 0,
+        out: 0,
+        count: 0
+      };
+    }
+
+    result[monthKey].count++;
+    result[monthKey][t.type] += Number(t.amount);
+  });
+
+  return Object.values(result).sort(
+    (a, b) => a.month.localeCompare(b.month)
+  );
 }
 
 function showPage(page){
@@ -58,7 +175,50 @@ document.getElementById("exportAll").style.display=page==="settings"?"none":"";
 if(page==="dashboard")drawChart();
 }
 
-function render(){
+function render() {
+  const filteredTransactions = getFilteredTransactions();
+  const filteredWallets = getFilteredWallets();
+
+  const r = rows();
+
+  const last = r.at(-1) || {
+    balance: 0,
+    idrBalance: 0,
+    rate: settings.defaultRate
+  };
+
+  const tin = filteredTransactions
+    .filter(t => t.type === "in")
+    .reduce((a, t) => a + Number(t.amount), 0);
+
+  const tout = filteredTransactions
+    .filter(t => t.type === "out")
+    .reduce((a, t) => a + Number(t.amount), 0);
+
+  document.getElementById("dashUsd").textContent = usd(last.balance);
+  document.getElementById("dashIdr").textContent = idr(last.idrBalance);
+  document.getElementById("dashIn").textContent = usd(tin);
+  document.getElementById("dashOut").textContent = usd(tout);
+
+  document.getElementById("summaryCount").textContent =
+    filteredTransactions.length;
+
+  document.getElementById("summaryLargest").textContent =
+    usd(Math.max(0, ...filteredTransactions.map(t => Number(t.amount))));
+
+  document.getElementById("summaryRate").textContent = idr(last.rate);
+
+  document.getElementById("summaryWallets").textContent =
+    filteredWallets.length;
+
+  renderRecent(r);
+  renderLedger(r);
+  renderWallets();
+  renderQuickLists();
+  renderReports();
+  populateWallets();
+  drawChart();
+}
 const r=rows(), last=r.at(-1)||{balance:0,idrBalance:0,rate:settings.defaultRate};
 const tin=transactions.filter(t=>t.type==="in").reduce((a,t)=>a+Number(t.amount),0);
 const tout=transactions.filter(t=>t.type==="out").reduce((a,t)=>a+Number(t.amount),0);
@@ -82,11 +242,88 @@ const q=document.getElementById("searchLedger").value.toLowerCase(),w=document.g
 const b=document.getElementById("ledgerBody");b.innerHTML="";
 r.filter(t=>(!q||t.note.toLowerCase().includes(q))&&(!w||t.wallet===w)&&(!tp||t.type===tp)&&(!d||t.date===d)).forEach(t=>{const tr=document.createElement("tr");tr.innerHTML=`<td>${dateLabel(t.date)}</td><td>${esc(t.note)}</td><td>${esc(t.wallet)}</td><td>${idr(t.rate)}</td><td class="green">${t.type==="in"?usd(t.amount):"-"}</td><td class="red">${t.type==="out"?usd(t.amount):"-"}</td><td><strong>${usd(t.balance)}</strong></td><td>${idr(t.idrBalance)}</td><td><div class="action-group"><button class="icon-action" onclick="editTx(${t.id})">Edit</button><button class="icon-action delete" onclick="deleteTx(${t.id})">Hapus</button></div></td>`;b.appendChild(tr)})
 }
-function renderWallets(){
+function renderWallets() {
+  const c = document.getElementById("walletCards");
+  const filteredWallets = getFilteredWallets();
+
+  c.innerHTML = "";
+
+  filteredWallets.forEach(w => {
+    const a = document.createElement("article");
+
+    a.className = "metric wallet-card";
+
+    a.innerHTML = `
+      <div class="wallet-top">
+        <div>
+          <span>${esc(w.type)}</span>
+          <h3>${esc(w.name)}</h3>
+        </div>
+
+        <span class="wallet-dot ${w.color}"></span>
+      </div>
+
+      <strong>${usd(walletBalance(w.name))}</strong>
+      <small>Saldo wallet</small>
+    `;
+
+    c.appendChild(a);
+  });
+}
 const c=document.getElementById("walletCards");c.innerHTML="";
 wallets.forEach(w=>{const a=document.createElement("article");a.className="metric wallet-card";a.innerHTML=`<div class="wallet-top"><div><span>${esc(w.type)}</span><h3>${esc(w.name)}</h3></div><span class="wallet-dot ${w.color}"></span></div><strong>${usd(walletBalance(w.name))}</strong><small>Saldo wallet</small>`;c.appendChild(a)})
 }
-function renderQuickLists(){
+function renderQuickLists() {
+  const filteredTransactions = getFilteredTransactions();
+
+  const cin = document.getElementById("cashInList");
+  const cout = document.getElementById("cashOutList");
+
+  cin.innerHTML = "";
+  cout.innerHTML = "";
+
+  filteredTransactions
+    .filter(t => t.type === "in")
+    .slice(-6)
+    .reverse()
+    .forEach(t => {
+      cin.innerHTML += `
+        <div class="transaction-item">
+          <div>
+            <strong>${esc(t.note)}</strong>
+            <small>
+              ${dateLabel(t.date)} • ${esc(t.wallet)}
+            </small>
+          </div>
+
+          <strong class="green">
+            ${usd(t.amount)}
+          </strong>
+        </div>
+      `;
+    });
+
+  filteredTransactions
+    .filter(t => t.type === "out")
+    .slice(-6)
+    .reverse()
+    .forEach(t => {
+      cout.innerHTML += `
+        <div class="transaction-item">
+          <div>
+            <strong>${esc(t.note)}</strong>
+            <small>
+              ${dateLabel(t.date)} • ${esc(t.wallet)}
+            </small>
+          </div>
+
+          <strong class="red">
+            ${usd(t.amount)}
+          </strong>
+        </div>
+      `;
+    });
+}
 const cin=document.getElementById("cashInList"),cout=document.getElementById("cashOutList");
 cin.innerHTML="";cout.innerHTML="";
 transactions.filter(t=>t.type==="in").slice(-6).reverse().forEach(t=>cin.innerHTML+=`<div class="transaction-item"><div><strong>${esc(t.note)}</strong><small>${dateLabel(t.date)} • ${esc(t.wallet)}</small></div><strong class="green">${usd(t.amount)}</strong></div>`);
@@ -97,7 +334,35 @@ const s=monthly(),b=document.getElementById("reportBody");b.innerHTML="";
 s.forEach(x=>{const net=x.in-x.out;const label=new Date(x.month+"-01T00:00:00").toLocaleDateString("id-ID",{month:"long",year:"numeric"});b.innerHTML+=`<tr><td>${label}</td><td class="green">${usd(x.in)}</td><td class="red">${usd(x.out)}</td><td class="${net>=0?"green":"red"}">${usd(net)}</td><td>${x.count}</td></tr>`});
 const cur=new Date().toISOString().slice(0,7),m=s.find(x=>x.month===cur)||{in:0,out:0};document.getElementById("reportIn").textContent=usd(m.in);document.getElementById("reportOut").textContent=usd(m.out);document.getElementById("reportNet").textContent=usd(m.in-m.out)
 }
-function populateWallets(){
+function populateWallets() {
+  const filteredWallets = getFilteredWallets();
+
+  const opts = filteredWallets
+    .map(w => `<option>${esc(w.name)}</option>`)
+    .join("");
+
+  document
+    .querySelectorAll('select[name="wallet"]')
+    .forEach(s => {
+      const old = s.value;
+
+      s.innerHTML = opts;
+
+      if (old) {
+        s.value = old;
+      }
+    });
+
+  const f = document.getElementById("filterWallet");
+  const old = f.value;
+
+  f.innerHTML =
+    '<option value="">Semua wallet</option>' + opts;
+
+  if (old) {
+    f.value = old;
+  }
+}
 const opts=wallets.map(w=>`<option>${esc(w.name)}</option>`).join("");
 document.querySelectorAll('select[name="wallet"]').forEach(s=>{const old=s.value;s.innerHTML=opts;if(old)s.value=old});
 const f=document.getElementById("filterWallet"),old=f.value;f.innerHTML='<option value="">Semua wallet</option>'+opts;if(old)f.value=old
