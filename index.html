@@ -54,10 +54,19 @@
           <p id="pageSubtitle">Ringkasan kondisi keuangan.</p>
         </div>
         <div class="top-actions">
-          <button id="exportAll" class="btn secondary">Export CSV</button>
-          <button id="openTransactionModal" class="btn primary">+ Tambah Transaksi</button>
-        </div>
-      </header>
+  <select id="storeSelector" class="store-selector" aria-label="Pilih toko">
+    <option value="all">Semua Toko</option>
+  </select>
+
+  <button id="exportAll" class="btn secondary">
+    Export CSV
+  </button>
+
+  <button id="openTransactionModal" class="btn primary">
+    + Tambah Transaksi
+  </button>
+</div>
+</header>
 
       <section id="dashboardPage" class="page active">
         <div class="cards four">
