@@ -208,6 +208,11 @@ let settings = safeParse(
 );
 let editingId = null;
 
+const reportFilters = {
+  year: String(new Date().getFullYear()),
+  walletId: "all"
+};
+
 transactions = transactions.map(transaction => {
   const rate = Number(transaction.rate || settings.defaultRate || 0);
   const storedUsd = Number(transaction.amount || 0);
@@ -822,6 +827,176 @@ function monthly() {
   );
 }
 
+function getReportTransactions() {
+  let result = getFilteredTransactions();
+
+  if (reportFilters.year !== "all") {
+    result = result.filter(transaction =>
+      String(transaction.date || "").startsWith(`${reportFilters.year}-`)
+    );
+  }
+
+  if (reportFilters.walletId !== "all") {
+    const wallet = getWalletById(reportFilters.walletId);
+    result = wallet
+      ? result.filter(transaction => transactionBelongsToWallet(transaction, wallet))
+      : [];
+  }
+
+  return result;
+}
+
+function reportMonthly() {
+  const result = {};
+
+  getReportTransactions().forEach(transaction => {
+    const monthKey = String(transaction.date || "").slice(0, 7);
+    if (!monthKey) return;
+
+    if (!result[monthKey]) {
+      result[monthKey] = {
+        month: monthKey,
+        inUsd: 0,
+        outUsd: 0,
+        inUsdt: 0,
+        outUsdt: 0,
+        inIdr: 0,
+        outIdr: 0,
+        combinedInIdr: 0,
+        combinedOutIdr: 0,
+        count: 0
+      };
+    }
+
+    const item = result[monthKey];
+    const amount = transactionPaymentAmount(transaction);
+    const currency = transactionCurrency(transaction);
+    const side = transaction.type === "out" ? "out" : "in";
+
+    item.count += 1;
+
+    if (currency === "IDR") {
+      item[`${side}Idr`] += amount;
+    } else if (currency === "USDT") {
+      item[`${side}Usdt`] += amount;
+    } else {
+      item[`${side}Usd`] += amount;
+    }
+
+    item[side === "in" ? "combinedInIdr" : "combinedOutIdr"] +=
+      transactionIdr(transaction);
+  });
+
+  return Object.values(result).sort((a, b) =>
+    b.month.localeCompare(a.month)
+  );
+}
+
+function reportTotals() {
+  return getReportTransactions().reduce(
+    (totals, transaction) => {
+      const side = transaction.type === "out" ? "out" : "in";
+      const amount = transactionPaymentAmount(transaction);
+      const currency = transactionCurrency(transaction);
+
+      if (currency === "IDR") {
+        totals[`${side}Idr`] += amount;
+      } else if (currency === "USDT") {
+        totals[`${side}Usdt`] += amount;
+      } else {
+        totals[`${side}Usd`] += amount;
+      }
+
+      totals[side === "in" ? "combinedInIdr" : "combinedOutIdr"] +=
+        transactionIdr(transaction);
+      totals.count += 1;
+      return totals;
+    },
+    {
+      inUsd: 0,
+      outUsd: 0,
+      inUsdt: 0,
+      outUsdt: 0,
+      inIdr: 0,
+      outIdr: 0,
+      combinedInIdr: 0,
+      combinedOutIdr: 0,
+      count: 0
+    }
+  );
+}
+
+function reportPeriodText() {
+  const yearText =
+    reportFilters.year === "all"
+      ? "Semua tahun"
+      : `Tahun ${reportFilters.year}`;
+
+  if (reportFilters.walletId === "all") {
+    return `${yearText} • Semua rekening`;
+  }
+
+  const wallet = getWalletById(reportFilters.walletId);
+  return wallet
+    ? `${yearText} • ${accountDisplayName(wallet, true)}`
+    : yearText;
+}
+
+function reportBreakdownHtml(incoming, outgoing, formatter) {
+  const net = incoming - outgoing;
+
+  return `
+    <div class="report-breakdown">
+      <div>
+        <span>Masuk</span>
+        <strong class="green">${formatter(incoming)}</strong>
+      </div>
+      <div>
+        <span>Keluar</span>
+        <strong class="red">${formatter(outgoing)}</strong>
+      </div>
+      <div class="report-net-line">
+        <span>Net</span>
+        <strong class="${net >= 0 ? "green" : "red"}">${formatter(net)}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function reportSummaryCardHtml(title, code, incoming, outgoing, formatter, note = "") {
+  const net = incoming - outgoing;
+
+  return `
+    <article class="report-summary-card report-${code.toLowerCase()}">
+      <div class="report-summary-head">
+        <div>
+          <span>${title}</span>
+          <small>${reportPeriodText()}</small>
+        </div>
+        <strong class="report-code">${code}</strong>
+      </div>
+
+      <div class="report-summary-values">
+        <div>
+          <span>Masuk</span>
+          <strong class="green">${formatter(incoming)}</strong>
+        </div>
+        <div>
+          <span>Keluar</span>
+          <strong class="red">${formatter(outgoing)}</strong>
+        </div>
+        <div>
+          <span>Net</span>
+          <strong class="${net >= 0 ? "green" : "red"}">${formatter(net)}</strong>
+        </div>
+      </div>
+
+      ${note ? `<small class="report-card-note">${note}</small>` : ""}
+    </article>
+  `;
+}
+
+
 function injectStoreStyles() {
   if (document.getElementById("multiStoreStyles")) return;
 
@@ -971,6 +1146,402 @@ function injectStoreStyles() {
 
   document.head.appendChild(style);
 }
+
+function injectReportStyles() {
+  if (document.getElementById("reportModernStyles")) return;
+
+  const style = document.createElement("style");
+  style.id = "reportModernStyles";
+  style.textContent = `
+    .report-summary-grid {
+      display: grid !important;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .report-summary-card {
+      min-width: 0;
+      padding: 18px;
+      border: 1px solid var(--border, #d9dee7);
+      border-radius: 14px;
+      background: var(--card, #fff);
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+    }
+
+    .report-summary-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .report-summary-head > div > span {
+      display: block;
+      color: var(--text, #172033);
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .report-summary-head small,
+    .report-card-note {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted, #6b778c);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .report-code {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 46px;
+      padding: 6px 9px;
+      border-radius: 999px;
+      background: rgba(15, 118, 110, 0.10);
+      color: #0f766e;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+    }
+
+    .report-idr .report-code {
+      background: rgba(22, 128, 61, 0.10);
+      color: #16803d;
+    }
+
+    .report-usd .report-code {
+      background: rgba(37, 99, 235, 0.10);
+      color: #2563eb;
+    }
+
+    .report-usdt .report-code {
+      background: rgba(15, 118, 110, 0.10);
+      color: #0f766e;
+    }
+
+    .report-combined .report-code {
+      background: rgba(169, 45, 52, 0.10);
+      color: #a92d34;
+    }
+
+    .report-summary-values {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .report-summary-values > div {
+      min-width: 0;
+      padding: 10px;
+      border-radius: 10px;
+      background: var(--soft, #f6f8fb);
+    }
+
+    .report-summary-values span {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted, #6b778c);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .report-summary-values strong {
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: 15px;
+      line-height: 1.25;
+    }
+
+    .report-filter-bar {
+      display: flex;
+      align-items: end;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 14px 16px;
+      margin: 0 0 14px;
+      border: 1px solid var(--border, #d9dee7);
+      border-radius: 12px;
+      background: var(--soft, #f8fafc);
+    }
+
+    .report-filter-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 180px;
+    }
+
+    .report-filter-field.account-filter {
+      min-width: 280px;
+      flex: 1;
+    }
+
+    .report-filter-field label {
+      color: var(--muted, #6b778c);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .report-filter-field select {
+      width: 100%;
+      height: 42px;
+      padding: 0 12px;
+      border: 1px solid var(--border, #d9dee7);
+      border-radius: 9px;
+      background: var(--card, #fff);
+      color: var(--text, #172033);
+      font-weight: 700;
+    }
+
+    .report-filter-caption {
+      margin-left: auto;
+      padding-bottom: 10px;
+      color: var(--muted, #6b778c);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .report-table-wrap {
+      overflow-x: auto;
+      border-radius: 0 0 12px 12px;
+    }
+
+    .report-modern-table {
+      min-width: 1180px;
+    }
+
+    .report-modern-table th {
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    .report-modern-table td {
+      vertical-align: top;
+    }
+
+    .report-month-label strong {
+      display: block;
+      white-space: nowrap;
+    }
+
+    .report-month-label small {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted, #6b778c);
+      font-size: 11px;
+    }
+
+    .report-breakdown {
+      display: grid;
+      gap: 7px;
+      min-width: 165px;
+    }
+
+    .report-breakdown > div {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .report-breakdown span {
+      color: var(--muted, #6b778c);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .report-breakdown strong {
+      white-space: nowrap;
+      font-size: 12px;
+    }
+
+    .report-net-line {
+      padding-top: 7px;
+      border-top: 1px dashed var(--border, #d9dee7);
+    }
+
+    .report-empty {
+      padding: 30px !important;
+      color: var(--muted, #6b778c);
+      text-align: center;
+    }
+
+    @media (max-width: 1250px) {
+      .report-summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 760px) {
+      .report-summary-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .report-summary-values {
+        grid-template-columns: 1fr;
+      }
+
+      .report-filter-field,
+      .report-filter-field.account-filter {
+        min-width: 100%;
+        width: 100%;
+      }
+
+      .report-filter-caption {
+        margin-left: 0;
+        padding-bottom: 0;
+      }
+    }
+  `;
+
+  document.head.appendChild(style);
+}
+
+function ensureReportLayout() {
+  const body = document.getElementById("reportBody");
+  if (!body) return;
+
+  const oldValues = [
+    document.getElementById("reportIn"),
+    document.getElementById("reportOut"),
+    document.getElementById("reportNet")
+  ].filter(Boolean);
+
+  const oldCards = oldValues.map(value =>
+    value.closest(".metric, article, .card")
+  ).filter(Boolean);
+
+  const oldGrid = oldCards[0]?.parentElement;
+  if (
+    oldGrid &&
+    oldCards.length &&
+    oldCards.every(card => card.parentElement === oldGrid)
+  ) {
+    oldGrid.id = "reportSummaryGrid";
+    oldGrid.className = "report-summary-grid";
+    oldGrid.innerHTML = "";
+  }
+
+  const table = body.closest("table");
+  if (table) {
+    table.classList.add("report-modern-table");
+
+    const head = table.querySelector("thead");
+    if (head) {
+      head.innerHTML = `
+        <tr>
+          <th>Bulan</th>
+          <th>IDR</th>
+          <th>USD</th>
+          <th>USDT</th>
+          <th>Gabungan IDR</th>
+          <th>Transaksi</th>
+        </tr>
+      `;
+    }
+
+    const currentParent = table.parentElement;
+    if (currentParent && !currentParent.classList.contains("report-table-wrap")) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "report-table-wrap";
+      currentParent.insertBefore(wrapper, table);
+      wrapper.appendChild(table);
+    }
+
+    if (!document.getElementById("reportFilterBar")) {
+      const filterBar = document.createElement("div");
+      filterBar.id = "reportFilterBar";
+      filterBar.className = "report-filter-bar";
+      filterBar.innerHTML = `
+        <div class="report-filter-field">
+          <label for="reportYearFilter">Periode</label>
+          <select id="reportYearFilter"></select>
+        </div>
+
+        <div class="report-filter-field account-filter">
+          <label for="reportAccountFilter">Rekening</label>
+          <select id="reportAccountFilter"></select>
+        </div>
+
+        <div id="reportFilterCaption" class="report-filter-caption"></div>
+      `;
+
+      const wrap = table.closest(".report-table-wrap");
+      wrap?.parentElement?.insertBefore(filterBar, wrap);
+
+      filterBar.querySelector("#reportYearFilter")?.addEventListener("change", event => {
+        reportFilters.year = event.target.value;
+        renderReports();
+      });
+
+      filterBar.querySelector("#reportAccountFilter")?.addEventListener("change", event => {
+        reportFilters.walletId = event.target.value;
+        renderReports();
+      });
+    }
+  }
+}
+
+function populateReportFilters() {
+  const yearSelect = document.getElementById("reportYearFilter");
+  const accountSelect = document.getElementById("reportAccountFilter");
+  const baseTransactions = getFilteredTransactions();
+
+  if (yearSelect) {
+    const years = [...new Set(
+      baseTransactions
+        .map(transaction => String(transaction.date || "").slice(0, 4))
+        .filter(Boolean)
+    )].sort((a, b) => b.localeCompare(a));
+
+    const allowedYears = new Set(["all", ...years]);
+    if (!allowedYears.has(reportFilters.year)) {
+      reportFilters.year = years.includes(String(new Date().getFullYear()))
+        ? String(new Date().getFullYear())
+        : years[0] || "all";
+    }
+
+    yearSelect.innerHTML = [
+      `<option value="all">Semua Tahun</option>`,
+      ...years.map(year => `<option value="${esc(year)}">Tahun ${esc(year)}</option>`)
+    ].join("");
+    yearSelect.value = reportFilters.year;
+  }
+
+  if (accountSelect) {
+    const availableWallets = getFilteredWallets();
+    const allowedWallets = new Set([
+      "all",
+      ...availableWallets.map(wallet => String(wallet.id))
+    ]);
+
+    if (!allowedWallets.has(String(reportFilters.walletId))) {
+      reportFilters.walletId = "all";
+    }
+
+    accountSelect.innerHTML = [
+      `<option value="all">Semua Rekening</option>`,
+      ...availableWallets.map(wallet => `
+        <option value="${esc(wallet.id)}">
+          ${esc(accountDisplayName(wallet, true))}
+        </option>
+      `)
+    ].join("");
+    accountSelect.value = reportFilters.walletId;
+  }
+
+  const caption = document.getElementById("reportFilterCaption");
+  if (caption) {
+    caption.textContent = reportPeriodText();
+  }
+}
+
 
 
 function ensureUsdtDashboardCard() {
@@ -1668,70 +2239,89 @@ function renderQuickLists() {
 }
 
 function renderReports() {
-  const summary = monthly();
-  const body = document.getElementById("reportBody");
+  ensureReportLayout();
+  populateReportFilters();
 
-  if (body) {
-    body.innerHTML = "";
+  const totals = reportTotals();
+  const summaryGrid = document.getElementById("reportSummaryGrid");
 
-    summary.forEach(item => {
-      const netUsd = item.in - item.out;
-      const netUsdt = item.inUsdt - item.outUsdt;
-      const netIdr = item.inIdr - item.outIdr;
-
-      const label = new Date(
-        `${item.month}-01T00:00:00`
-      ).toLocaleDateString("id-ID", {
-        month: "long",
-        year: "numeric"
-      });
-
-      body.innerHTML += `
-        <tr>
-          <td>${label}</td>
-          <td class="green">
-            ${dualMoneyHtml(item.in, item.inUsdt, item.inIdr)}
-          </td>
-          <td class="red">
-            ${dualMoneyHtml(item.out, item.outUsdt, item.outIdr)}
-          </td>
-          <td class="${netUsd >= 0 && netUsdt >= 0 && netIdr >= 0 ? "green" : "red"}">
-            ${dualMoneyHtml(netUsd, netUsdt, netIdr)}
-          </td>
-          <td>${item.count}</td>
-        </tr>
-      `;
-    });
+  if (summaryGrid) {
+    summaryGrid.innerHTML = [
+      reportSummaryCardHtml(
+        "Rupiah",
+        "IDR",
+        totals.inIdr,
+        totals.outIdr,
+        idr
+      ),
+      reportSummaryCardHtml(
+        "Dolar Amerika",
+        "USD",
+        totals.inUsd,
+        totals.outUsd,
+        usd
+      ),
+      reportSummaryCardHtml(
+        "Tether",
+        "USDT",
+        totals.inUsdt,
+        totals.outUsdt,
+        usdt
+      ),
+      reportSummaryCardHtml(
+        "Total Gabungan",
+        "IDR",
+        totals.combinedInIdr,
+        totals.combinedOutIdr,
+        idr,
+        "USD dan USDT dikonversi memakai rate pada masing-masing transaksi."
+      ).replace("report-idr", "report-combined")
+    ].join("");
   }
 
-  const currentMonth = new Date().toISOString().slice(0, 7);
-  const current = summary.find(item => item.month === currentMonth) || {
-    in: 0,
-    out: 0,
-    inUsdt: 0,
-    outUsdt: 0,
-    inIdr: 0,
-    outIdr: 0
-  };
+  const body = document.getElementById("reportBody");
+  if (!body) return;
 
-  setDualDashboardValue(
-    "reportIn",
-    current.in,
-    current.inUsdt,
-    current.inIdr
-  );
-  setDualDashboardValue(
-    "reportOut",
-    current.out,
-    current.outUsdt,
-    current.outIdr
-  );
-  setDualDashboardValue(
-    "reportNet",
-    current.in - current.out,
-    current.inUsdt - current.outUsdt,
-    current.inIdr - current.outIdr
-  );
+  const summary = reportMonthly();
+  body.innerHTML = "";
+
+  if (!summary.length) {
+    body.innerHTML = `
+      <tr>
+        <td colspan="6" class="report-empty">
+          Belum ada transaksi untuk periode dan rekening yang dipilih.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  summary.forEach(item => {
+    const label = new Date(
+      `${item.month}-01T00:00:00`
+    ).toLocaleDateString("id-ID", {
+      month: "long",
+      year: "numeric"
+    });
+
+    body.innerHTML += `
+      <tr>
+        <td class="report-month-label">
+          <strong>${label}</strong>
+          <small>${item.count} transaksi</small>
+        </td>
+        <td>${reportBreakdownHtml(item.inIdr, item.outIdr, idr)}</td>
+        <td>${reportBreakdownHtml(item.inUsd, item.outUsd, usd)}</td>
+        <td>${reportBreakdownHtml(item.inUsdt, item.outUsdt, usdt)}</td>
+        <td>${reportBreakdownHtml(
+          item.combinedInIdr,
+          item.combinedOutIdr,
+          idr
+        )}</td>
+        <td><strong>${item.count}</strong></td>
+      </tr>
+    `;
+  });
 }
 
 function populateWallets() {
@@ -2093,31 +2683,44 @@ function exportAll() {
 }
 
 function exportReport() {
-  exportCsv("ledger-pro-report.csv", [
+  const data = reportMonthly();
+  const period = reportFilters.year === "all" ? "semua-tahun" : reportFilters.year;
+  const account =
+    reportFilters.walletId === "all"
+      ? "semua-rekening"
+      : String(reportFilters.walletId).replace(/[^a-z0-9_-]+/gi, "-");
+
+  exportCsv(`ledger-pro-laporan-${period}-${account}.csv`, [
     [
       "Bulan",
-      "Masuk USD",
-      "Masuk USDT",
       "Masuk IDR",
-      "Keluar USD",
-      "Keluar USDT",
       "Keluar IDR",
-      "Net USD",
-      "Net USDT",
       "Net IDR",
-      "Jumlah"
+      "Masuk USD",
+      "Keluar USD",
+      "Net USD",
+      "Masuk USDT",
+      "Keluar USDT",
+      "Net USDT",
+      "Gabungan Masuk IDR",
+      "Gabungan Keluar IDR",
+      "Gabungan Net IDR",
+      "Jumlah Transaksi"
     ],
-    ...monthly().map(item => [
+    ...data.map(item => [
       item.month,
-      item.in,
-      item.inUsdt,
       item.inIdr,
-      item.out,
-      item.outUsdt,
       item.outIdr,
-      item.in - item.out,
-      item.inUsdt - item.outUsdt,
       item.inIdr - item.outIdr,
+      item.inUsd,
+      item.outUsd,
+      item.inUsd - item.outUsd,
+      item.inUsdt,
+      item.outUsdt,
+      item.inUsdt - item.outUsdt,
+      item.combinedInIdr,
+      item.combinedOutIdr,
+      item.combinedInIdr - item.combinedOutIdr,
       item.count
     ])
   ]);
@@ -2343,11 +2946,13 @@ function bindEvents() {
 
 function initialize() {
   injectStoreStyles();
+  injectReportStyles();
   ensureStoreSelector();
   ensureUsdtDashboardCard();
   populateStores();
   injectCurrencyFields();
   injectAccountFields();
+  ensureReportLayout();
   bindEvents();
 
   document
