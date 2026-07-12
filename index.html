@@ -1,443 +1,257 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8">
-
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  >
-
-  <title>Ledger Finance System</title>
-
-  <link rel="stylesheet" href="style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ledger Pro V2</title>
+  <link rel="stylesheet" href="assets/css/style.css">
 </head>
-
 <body>
+  <div id="loginScreen" class="login-screen">
+    <div class="login-card">
+      <div class="logo-badge">$</div>
+      <h1>Ledger Pro</h1>
+      <p>Finance Management System</p>
+      <label>Email</label>
+      <input id="loginEmail" type="email" value="owner@ledger.local">
+      <label>Password</label>
+      <input id="loginPassword" type="password" value="123456">
+      <button id="loginButton" class="btn primary full">Masuk</button>
+      <small>Demo login: isi bebas, lalu klik Masuk.</small>
+    </div>
+  </div>
 
-  <div class="app-layout">
-
-    <!-- Sidebar -->
+  <div id="app" class="app hidden">
     <aside class="sidebar">
-
       <div class="brand">
-        <div class="brand-logo">$</div>
-
+        <div class="brand-mark">$</div>
         <div>
-          <h2>Ledger Pro</h2>
-          <span>Finance System</span>
+          <strong>Ledger Pro</strong>
+          <span>Finance System V2</span>
         </div>
       </div>
 
-      <nav class="sidebar-menu">
-
-        <button class="menu-item active">
-          <span class="menu-icon">▦</span>
-          Dashboard
-        </button>
-
-        <button class="menu-item">
-          <span class="menu-icon">↔</span>
-          Transaksi
-        </button>
-
-        <button class="menu-item">
-          <span class="menu-icon">▤</span>
-          Laporan
-        </button>
-
-        <button class="menu-item">
-          <span class="menu-icon">◉</span>
-          Pengaturan
-        </button>
-
+      <nav id="sidebarNav">
+        <button class="nav-item active" data-page="dashboard">▦ <span>Dashboard</span></button>
+        <button class="nav-item" data-page="ledger">▤ <span>Ledger</span></button>
+        <button class="nav-item" data-page="cashin">＋ <span>Cash In</span></button>
+        <button class="nav-item" data-page="cashout">− <span>Cash Out</span></button>
+        <button class="nav-item" data-page="wallets">▣ <span>Wallet</span></button>
+        <button class="nav-item" data-page="reports">⌁ <span>Laporan</span></button>
+        <button class="nav-item" data-page="settings">⚙ <span>Pengaturan</span></button>
       </nav>
 
-      <div class="sidebar-footer">
-        <div class="profile-avatar">SK</div>
-
-        <div class="profile-info">
-          <strong>Owner</strong>
-          <span>Administrator</span>
-        </div>
+      <div class="sidebar-bottom">
+        <button id="themeToggle" class="ghost full">🌙 Dark mode</button>
+        <button id="logoutButton" class="ghost full">Keluar</button>
       </div>
-
     </aside>
 
-    <!-- Main content -->
-    <main class="main-content">
-
-      <!-- Header -->
+    <main class="main">
       <header class="topbar">
-
         <div>
-          <h1>Dashboard Ledger</h1>
-          <p>Pantau saldo dan transaksi dari satu tempat.</p>
+          <h1 id="pageTitle">Dashboard</h1>
+          <p id="pageSubtitle">Ringkasan kondisi keuangan.</p>
         </div>
-
-        <div class="topbar-actions">
-
-          <button
-            type="button"
-            class="secondary-button"
-            id="exportButton"
-          >
-            Export CSV
-          </button>
-
-          <button
-            type="button"
-            class="primary-button"
-            id="openTransactionModal"
-          >
-            + Tambah Transaksi
-          </button>
-
+        <div class="top-actions">
+          <button id="exportAll" class="btn secondary">Export CSV</button>
+          <button id="openTransactionModal" class="btn primary">+ Tambah Transaksi</button>
         </div>
-
       </header>
 
-      <!-- Summary cards -->
-      <section class="summary-grid">
+      <section id="dashboardPage" class="page active">
+        <div class="cards four">
+          <article class="metric"><span>Saldo USD</span><strong id="dashUsd">$0.00</strong><small>Saldo berjalan</small></article>
+          <article class="metric"><span>Saldo IDR</span><strong id="dashIdr">Rp0</strong><small>Rate transaksi terakhir</small></article>
+          <article class="metric"><span>Total Masuk</span><strong id="dashIn" class="green">$0.00</strong><small>Semua transaksi masuk</small></article>
+          <article class="metric"><span>Total Keluar</span><strong id="dashOut" class="red">$0.00</strong><small>Semua transaksi keluar</small></article>
+        </div>
 
-        <article class="summary-card">
+        <div class="grid two-one">
+          <section class="panel">
+            <div class="panel-head">
+              <div><h3>Cashflow Bulanan</h3><p>Masuk dibanding keluar.</p></div>
+            </div>
+            <canvas id="cashflowChart" height="240"></canvas>
+          </section>
 
-          <div class="summary-card-header">
-            <span>Total Saldo USD</span>
-            <div class="summary-icon">US$</div>
+          <section class="panel">
+            <div class="panel-head"><div><h3>Ringkasan</h3><p>Status terkini.</p></div></div>
+            <div class="summary-list">
+              <div><span>Jumlah transaksi</span><strong id="summaryCount">0</strong></div>
+              <div><span>Nominal terbesar</span><strong id="summaryLargest">$0.00</strong></div>
+              <div><span>Rate terakhir</span><strong id="summaryRate">Rp0</strong></div>
+              <div><span>Wallet aktif</span><strong id="summaryWallets">0</strong></div>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div><h3>Transaksi Terbaru</h3><p>5 transaksi terakhir.</p></div>
+            <button class="text-button" data-jump="ledger">Lihat semua →</button>
           </div>
-
-          <strong id="totalSaldoUsd">$0.00</strong>
-
-          <small>Saldo berjalan saat ini</small>
-
-        </article>
-
-        <article class="summary-card">
-
-          <div class="summary-card-header">
-            <span>Total Saldo Rupiah</span>
-            <div class="summary-icon">Rp</div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Tanggal</th><th>Keterangan</th><th>Wallet</th><th>Tipe</th><th>Nominal</th><th>Saldo</th></tr></thead>
+              <tbody id="recentBody"></tbody>
+            </table>
           </div>
-
-          <strong id="totalSaldoIdr">Rp0</strong>
-
-          <small>Berdasarkan rate transaksi terakhir</small>
-
-        </article>
-
-        <article class="summary-card">
-
-          <div class="summary-card-header">
-            <span>Total Uang Masuk</span>
-            <div class="summary-icon green-icon">↓</div>
-          </div>
-
-          <strong
-            id="totalUangMasuk"
-            class="positive-text"
-          >
-            $0.00
-          </strong>
-
-          <small>Akumulasi seluruh pemasukan</small>
-
-        </article>
-
-        <article class="summary-card">
-
-          <div class="summary-card-header">
-            <span>Total Uang Keluar</span>
-            <div class="summary-icon red-icon">↑</div>
-          </div>
-
-          <strong
-            id="totalUangKeluar"
-            class="negative-text"
-          >
-            $0.00
-          </strong>
-
-          <small>Akumulasi seluruh pengeluaran</small>
-
-        </article>
-
+        </section>
       </section>
 
-      <!-- Transaction table -->
-      <section class="table-panel">
-
-        <div class="panel-header">
-
-          <div>
-            <h2>Riwayat Transaksi</h2>
-            <p>Semua pemasukan dan pengeluaran ledger.</p>
+      <section id="ledgerPage" class="page">
+        <section class="panel">
+          <div class="panel-head filter-head">
+            <div><h3>Ledger Utama</h3><p>Cari, edit, dan hapus transaksi.</p></div>
+            <div class="filters">
+              <input id="searchLedger" placeholder="Cari keterangan...">
+              <select id="filterWallet"><option value="">Semua wallet</option></select>
+              <select id="filterType">
+                <option value="">Semua tipe</option>
+                <option value="in">Masuk</option>
+                <option value="out">Keluar</option>
+              </select>
+              <input id="filterDate" type="date">
+            </div>
           </div>
-
-          <div class="filter-group">
-
-            <input
-              type="text"
-              id="searchInput"
-              placeholder="Cari keterangan..."
-            >
-
-            <select id="transactionTypeFilter">
-              <option value="">Semua transaksi</option>
-              <option value="masuk">Uang masuk</option>
-              <option value="keluar">Uang keluar</option>
-            </select>
-
-            <input
-              type="date"
-              id="dateFilter"
-            >
-
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Tanggal</th><th>Keterangan</th><th>Wallet</th><th>Rate</th><th>Masuk</th><th>Keluar</th><th>Saldo USD</th><th>Saldo IDR</th><th>Aksi</th></tr></thead>
+              <tbody id="ledgerBody"></tbody>
+            </table>
           </div>
-
-        </div>
-
-        <div class="table-wrapper">
-
-          <table>
-
-            <thead>
-              <tr>
-                <th>Tanggal</th>
-                <th>Keterangan</th>
-                <th>Rate IDR</th>
-                <th>Masuk</th>
-                <th>Keluar</th>
-                <th>Saldo USD</th>
-                <th>Saldo Rupiah</th>
-                <th>Status</th>
-                <th>Aksi</th>
-              </tr>
-            </thead>
-
-            <tbody id="transactionTableBody">
-              <!-- Diisi otomatis oleh script.js -->
-            </tbody>
-
-          </table>
-
-        </div>
-
-        <div class="table-footer">
-
-          <span id="transactionCount">
-            0 transaksi
-          </span>
-
-          <span>
-            Data sementara tersimpan di browser perangkat.
-          </span>
-
-        </div>
-
+        </section>
       </section>
 
+      <section id="cashinPage" class="page">
+        <div class="grid one-one">
+          <section class="panel form-panel">
+            <div class="panel-head"><div><h3>Tambah Cash In</h3><p>Input transaksi masuk.</p></div></div>
+            <form id="cashInForm" class="form-grid">
+              <label>Tanggal<input name="date" type="date" required></label>
+              <label>Wallet<select name="wallet" required></select></label>
+              <label class="full">Keterangan<input name="note" required placeholder="Contoh: Transfer masuk"></label>
+              <label>Rate USD/IDR<input name="rate" type="number" value="16300" required></label>
+              <label>Nominal USD<input name="amount" type="number" step="0.01" required></label>
+              <label class="full">Referensi<textarea name="reference" rows="3" placeholder="Opsional"></textarea></label>
+              <button class="btn primary full-row" type="submit">Simpan Cash In</button>
+            </form>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><div><h3>Cash In Terbaru</h3><p>Riwayat transaksi masuk.</p></div></div>
+            <div id="cashInList" class="transaction-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="cashoutPage" class="page">
+        <div class="grid one-one">
+          <section class="panel form-panel">
+            <div class="panel-head"><div><h3>Tambah Cash Out</h3><p>Input transaksi keluar.</p></div></div>
+            <form id="cashOutForm" class="form-grid">
+              <label>Tanggal<input name="date" type="date" required></label>
+              <label>Wallet<select name="wallet" required></select></label>
+              <label class="full">Keterangan<input name="note" required placeholder="Contoh: Biaya operasional"></label>
+              <label>Rate USD/IDR<input name="rate" type="number" value="16300" required></label>
+              <label>Nominal USD<input name="amount" type="number" step="0.01" required></label>
+              <label class="full">Referensi<textarea name="reference" rows="3" placeholder="Opsional"></textarea></label>
+              <button class="btn danger full-row" type="submit">Simpan Cash Out</button>
+            </form>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><div><h3>Cash Out Terbaru</h3><p>Riwayat transaksi keluar.</p></div></div>
+            <div id="cashOutList" class="transaction-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="walletsPage" class="page">
+        <div class="cards three" id="walletCards"></div>
+        <section class="panel form-panel">
+          <div class="panel-head"><div><h3>Tambah Wallet</h3><p>Bank, crypto wallet, atau kas.</p></div></div>
+          <form id="walletForm" class="form-grid">
+            <label>Nama Wallet<input name="name" required placeholder="Contoh: BCA"></label>
+            <label>Tipe<select name="type"><option>Bank</option><option>Crypto</option><option>Kas</option><option>Lainnya</option></select></label>
+            <label>Saldo Awal USD<input name="balance" type="number" step="0.01" value="0"></label>
+            <label>Warna Label<select name="color"><option value="blue">Biru</option><option value="green">Hijau</option><option value="purple">Ungu</option><option value="orange">Oranye</option></select></label>
+            <button class="btn primary full-row" type="submit">Tambah Wallet</button>
+          </form>
+        </section>
+      </section>
+
+      <section id="reportsPage" class="page">
+        <div class="cards three">
+          <article class="metric"><span>Bulan Ini Masuk</span><strong id="reportIn" class="green">$0.00</strong></article>
+          <article class="metric"><span>Bulan Ini Keluar</span><strong id="reportOut" class="red">$0.00</strong></article>
+          <article class="metric"><span>Net Cashflow</span><strong id="reportNet">$0.00</strong></article>
+        </div>
+        <section class="panel">
+          <div class="panel-head">
+            <div><h3>Laporan Bulanan</h3><p>Rekap berdasarkan bulan.</p></div>
+            <button id="exportReport" class="btn secondary">Export Laporan</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Bulan</th><th>Total Masuk</th><th>Total Keluar</th><th>Net</th><th>Jumlah Transaksi</th></tr></thead>
+              <tbody id="reportBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="settingsPage" class="page">
+        <div class="grid one-one">
+          <section class="panel form-panel">
+            <div class="panel-head"><div><h3>Pengaturan Aplikasi</h3><p>Preferensi dasar.</p></div></div>
+            <form id="settingsForm" class="form-grid">
+              <label>Nama aplikasi<input name="appName" value="Ledger Pro"></label>
+              <label>Rate default<input name="defaultRate" type="number" value="16300"></label>
+              <label>Format tanggal<select name="dateFormat"><option value="id-ID">Indonesia</option><option value="en-US">US</option></select></label>
+              <label>Mata uang utama<select name="currency"><option value="USD">USD</option><option value="IDR">IDR</option></select></label>
+              <button class="btn primary full-row" type="submit">Simpan Pengaturan</button>
+            </form>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><div><h3>Status Sistem</h3><p>Prototype lokal.</p></div></div>
+            <div class="summary-list">
+              <div><span>Penyimpanan</span><strong>Browser localStorage</strong></div>
+              <div><span>Login</span><strong>Demo lokal</strong></div>
+              <div><span>Database online</span><strong class="red">Belum</strong></div>
+              <div><span>Multi-user</span><strong class="red">Belum</strong></div>
+            </div>
+            <div class="panel-padding">
+              <button id="resetDemo" class="btn danger full">Reset Data Demo</button>
+            </div>
+          </section>
+        </div>
+      </section>
     </main>
-
   </div>
 
-  <!-- Modal tambah transaksi -->
-  <div
-    class="modal-overlay"
-    id="transactionModal"
-  >
-
+  <div id="transactionModal" class="modal">
     <div class="modal-card">
-
-      <div class="modal-header">
-
-        <div>
-          <h2>Tambah Transaksi</h2>
-          <p>Masukkan transaksi uang masuk atau keluar.</p>
-        </div>
-
-        <button
-          type="button"
-          class="modal-close-button"
-          id="closeTransactionModal"
-          aria-label="Tutup"
-        >
-          ×
-        </button>
-
+      <div class="modal-head">
+        <div><h3 id="transactionModalTitle">Tambah Transaksi</h3><p>Masukkan data transaksi.</p></div>
+        <button id="closeTransactionModal" class="icon-button">×</button>
       </div>
-
-      <form id="transactionForm">
-
-        <div class="form-grid">
-
-          <div class="form-group">
-
-            <label for="transactionDate">
-              Tanggal
-            </label>
-
-            <input
-              type="date"
-              id="transactionDate"
-              required
-            >
-
-          </div>
-
-          <div class="form-group">
-
-            <label for="transactionType">
-              Jenis transaksi
-            </label>
-
-            <select
-              id="transactionType"
-              required
-            >
-              <option value="masuk">
-                Uang masuk
-              </option>
-
-              <option value="keluar">
-                Uang keluar
-              </option>
-            </select>
-
-          </div>
-
-          <div class="form-group full-width">
-
-            <label for="transactionDescription">
-              Keterangan
-            </label>
-
-            <input
-              type="text"
-              id="transactionDescription"
-              placeholder="Contoh: Transfer masuk Ledger A"
-              required
-            >
-
-          </div>
-
-          <div class="form-group">
-
-            <label for="transactionRate">
-              Rate USD ke IDR
-            </label>
-
-            <input
-              type="number"
-              id="transactionRate"
-              value="16300"
-              min="1"
-              required
-            >
-
-          </div>
-
-          <div class="form-group">
-
-            <label for="transactionAmount">
-              Nominal USD
-            </label>
-
-            <input
-              type="number"
-              id="transactionAmount"
-              placeholder="0.00"
-              min="0.01"
-              step="0.01"
-              required
-            >
-
-          </div>
-
-          <div class="form-group full-width">
-
-            <label for="transactionReference">
-              Referensi atau catatan
-            </label>
-
-            <textarea
-              id="transactionReference"
-              rows="3"
-              placeholder="Opsional"
-            ></textarea>
-
-          </div>
-
+      <form id="transactionForm" class="form-grid">
+        <label>Tanggal<input name="date" type="date" required></label>
+        <label>Wallet<select name="wallet" required></select></label>
+        <label>Tipe<select name="type"><option value="in">Masuk</option><option value="out">Keluar</option></select></label>
+        <label>Rate<input name="rate" type="number" value="16300" required></label>
+        <label class="full">Keterangan<input name="note" required></label>
+        <label>Nominal USD<input name="amount" type="number" step="0.01" required></label>
+        <label class="full">Referensi<textarea name="reference" rows="3"></textarea></label>
+        <div class="modal-actions full-row">
+          <button type="button" id="cancelTransactionModal" class="btn secondary">Batal</button>
+          <button type="submit" class="btn primary">Simpan</button>
         </div>
-
-        <div class="modal-actions">
-
-          <button
-            type="button"
-            class="secondary-button"
-            id="cancelTransaction"
-          >
-            Batal
-          </button>
-
-          <button
-            type="submit"
-            class="primary-button"
-          >
-            Simpan Transaksi
-          </button>
-
-        </div>
-
       </form>
-
     </div>
-
   </div>
 
-  <!-- Konfirmasi hapus -->
-  <div
-    class="modal-overlay"
-    id="deleteModal"
-  >
-
-    <div class="modal-card small-modal">
-
-      <div class="delete-icon">
-        !
-      </div>
-
-      <h2>Hapus transaksi?</h2>
-
-      <p>
-        Transaksi yang dihapus tidak dapat dikembalikan.
-      </p>
-
-      <div class="modal-actions">
-
-        <button
-          type="button"
-          class="secondary-button"
-          id="cancelDelete"
-        >
-          Batal
-        </button>
-
-        <button
-          type="button"
-          class="danger-button"
-          id="confirmDelete"
-        >
-          Hapus
-        </button>
-
-      </div>
-
-    </div>
-
-  </div>
-
-  <script src="script.js"></script>
-
+  <div id="toast" class="toast"></div>
+  <script src="assets/js/app.js"></script>
 </body>
 </html>
