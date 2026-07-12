@@ -332,10 +332,22 @@ function transactionIdr(transaction) {
   return Math.round(paymentAmount * rate);
 }
 
+function actualUsdAmount(transaction) {
+  return transactionCurrency(transaction) === "USD"
+    ? transactionPaymentAmount(transaction)
+    : 0;
+}
+
+function actualIdrAmount(transaction) {
+  return transactionCurrency(transaction) === "IDR"
+    ? transactionPaymentAmount(transaction)
+    : 0;
+}
+
 function dualMoneyHtml(usdValue, idrValue) {
   return `
-    <span class="money-primary">${usd(usdValue)}</span>
-    <span class="money-secondary">${idr(idrValue)}</span>
+    <span class="money-primary">USD ${usd(usdValue)}</span>
+    <span class="money-secondary">IDR ${idr(idrValue)}</span>
   `;
 }
 
@@ -346,17 +358,13 @@ function paymentMoneyHtml(transaction) {
   if (currency === "IDR") {
     return `
       <span class="money-primary">${idr(paymentAmount)}</span>
-      <span class="money-secondary">
-        Pembayaran IDR • setara ${usd(transactionUsd(transaction))}
-      </span>
+      <span class="money-secondary">Pembayaran IDR</span>
     `;
   }
 
   return `
     <span class="money-primary">${usd(paymentAmount)}</span>
-    <span class="money-secondary">
-      Pembayaran USD • setara ${idr(transactionIdr(transaction))}
-    </span>
+    <span class="money-secondary">Pembayaran USD</span>
   `;
 }
 
@@ -445,17 +453,13 @@ function rows() {
         Number(a.id) - Number(b.id)
     )
     .map(transaction => {
-      const amountUsd = transactionUsd(transaction);
-      const amountIdr = transactionIdr(transaction);
       const direction = transaction.type === "in" ? 1 : -1;
 
-      balanceUsd += direction * amountUsd;
-      balanceIdr += direction * amountIdr;
+      balanceUsd += direction * actualUsdAmount(transaction);
+      balanceIdr += direction * actualIdrAmount(transaction);
 
       return {
         ...transaction,
-        amount: amountUsd,
-        amountIdr,
         balance: balanceUsd,
         idrBalance: balanceIdr
       };
@@ -467,14 +471,15 @@ function walletBalance(wallet) {
     .filter(
       transaction =>
         transaction.storeId === wallet.storeId &&
-        transaction.wallet === wallet.name
+        transaction.wallet === wallet.name &&
+        transactionCurrency(transaction) === "USD"
     )
     .reduce(
       (total, transaction) =>
         total +
         (transaction.type === "in"
-          ? transactionUsd(transaction)
-          : -transactionUsd(transaction)),
+          ? transactionPaymentAmount(transaction)
+          : -transactionPaymentAmount(transaction)),
       0
     );
 
@@ -482,26 +487,21 @@ function walletBalance(wallet) {
 }
 
 function walletBalanceIdr(wallet) {
-  const transactionBalance = transactions
+  return transactions
     .filter(
       transaction =>
         transaction.storeId === wallet.storeId &&
-        transaction.wallet === wallet.name
+        transaction.wallet === wallet.name &&
+        transactionCurrency(transaction) === "IDR"
     )
     .reduce(
       (total, transaction) =>
         total +
         (transaction.type === "in"
-          ? transactionIdr(transaction)
-          : -transactionIdr(transaction)),
+          ? transactionPaymentAmount(transaction)
+          : -transactionPaymentAmount(transaction)),
       0
     );
-
-  const initialIdr =
-    Number(wallet.balance || 0) *
-    Number(settings.defaultRate || 0);
-
-  return transactionBalance + initialIdr;
 }
 
 function monthly() {
@@ -522,11 +522,14 @@ function monthly() {
     }
 
     result[monthKey].count += 1;
-    result[monthKey][transaction.type] +=
-      transactionUsd(transaction);
 
-    result[monthKey][`${transaction.type}Idr`] +=
-      transactionIdr(transaction);
+    if (transactionCurrency(transaction) === "IDR") {
+      result[monthKey][`${transaction.type}Idr`] +=
+        transactionPaymentAmount(transaction);
+    } else {
+      result[monthKey][transaction.type] +=
+        transactionPaymentAmount(transaction);
+    }
   });
 
   return Object.values(result).sort((a, b) =>
@@ -540,6 +543,14 @@ function injectStoreStyles() {
   const style = document.createElement("style");
   style.id = "multiStoreStyles";
   style.textContent = `
+    .currency-separation-note {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted, #6b778c);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
     .store-selector {
       min-width: 155px;
       height: 42px;
@@ -851,44 +862,66 @@ function render() {
     rate: settings.defaultRate
   };
 
-  const totalIn = filteredTransactions
-    .filter(transaction => transaction.type === "in")
+  const totalInUsd = filteredTransactions
+    .filter(
+      transaction =>
+        transaction.type === "in" &&
+        transactionCurrency(transaction) === "USD"
+    )
     .reduce(
       (total, transaction) =>
-        total + transactionUsd(transaction),
+        total + transactionPaymentAmount(transaction),
       0
     );
 
-  const totalOut = filteredTransactions
-    .filter(transaction => transaction.type === "out")
+  const totalOutUsd = filteredTransactions
+    .filter(
+      transaction =>
+        transaction.type === "out" &&
+        transactionCurrency(transaction) === "USD"
+    )
     .reduce(
       (total, transaction) =>
-        total + transactionUsd(transaction),
+        total + transactionPaymentAmount(transaction),
       0
     );
 
   const totalInIdr = filteredTransactions
-    .filter(transaction => transaction.type === "in")
+    .filter(
+      transaction =>
+        transaction.type === "in" &&
+        transactionCurrency(transaction) === "IDR"
+    )
     .reduce(
       (total, transaction) =>
-        total + transactionIdr(transaction),
+        total + transactionPaymentAmount(transaction),
       0
     );
 
   const totalOutIdr = filteredTransactions
-    .filter(transaction => transaction.type === "out")
+    .filter(
+      transaction =>
+        transaction.type === "out" &&
+        transactionCurrency(transaction) === "IDR"
+    )
     .reduce(
       (total, transaction) =>
-        total + transactionIdr(transaction),
+        total + transactionPaymentAmount(transaction),
       0
     );
 
-  const largestTransaction = filteredTransactions.reduce(
-    (largest, transaction) =>
-      transactionUsd(transaction) > transactionUsd(largest)
-        ? transaction
-        : largest,
-    null
+  const largestUsd = Math.max(
+    0,
+    ...filteredTransactions
+      .filter(transaction => transactionCurrency(transaction) === "USD")
+      .map(transaction => transactionPaymentAmount(transaction))
+  );
+
+  const largestIdr = Math.max(
+    0,
+    ...filteredTransactions
+      .filter(transaction => transactionCurrency(transaction) === "IDR")
+      .map(transaction => transactionPaymentAmount(transaction))
   );
 
   const setText = (id, value) => {
@@ -898,14 +931,25 @@ function render() {
 
   setText("dashUsd", usd(last.balance));
   setText("dashIdr", idr(last.idrBalance));
-  setDualDashboardValue("dashIn", totalIn, totalInIdr);
-  setDualDashboardValue("dashOut", totalOut, totalOutIdr);
+
+  setDualDashboardValue(
+    "dashIn",
+    totalInUsd,
+    totalInIdr
+  );
+
+  setDualDashboardValue(
+    "dashOut",
+    totalOutUsd,
+    totalOutIdr
+  );
+
   setText("summaryCount", filteredTransactions.length);
 
   setDualDashboardValue(
     "summaryLargest",
-    largestTransaction ? transactionUsd(largestTransaction) : 0,
-    largestTransaction ? transactionIdr(largestTransaction) : 0
+    largestUsd,
+    largestIdr
   );
 
   setText("summaryRate", idr(last.rate));
@@ -1260,22 +1304,35 @@ function drawChart() {
   context.clearRect(0, 0, width, height);
 
   const summary = monthly().slice(-8);
-  const maximum = Math.max(
-    1,
-    ...summary.flatMap(item => [item.in, item.out])
+  const hasUsd = summary.some(item => item.in > 0 || item.out > 0);
+  const chartCurrency = hasUsd ? "USD" : "IDR";
+
+  const values = summary.flatMap(item =>
+    chartCurrency === "USD"
+      ? [item.in, item.out]
+      : [item.inIdr, item.outIdr]
   );
 
+  const maximum = Math.max(1, ...values);
   const padding = 34;
   const chartHeight = height - 60;
   const chartWidth = width - padding * 2;
   const styles = getComputedStyle(document.body);
 
-  context.strokeStyle = styles.getPropertyValue("--border").trim() || "#ddd";
-  context.fillStyle = styles.getPropertyValue("--muted").trim() || "#777";
+  context.strokeStyle =
+    styles.getPropertyValue("--border").trim() || "#ddd";
+  context.fillStyle =
+    styles.getPropertyValue("--muted").trim() || "#777";
   context.font = "12px Arial";
 
+  context.fillText(
+    `Grafik ${chartCurrency} — saldo USD dan IDR dihitung terpisah`,
+    padding,
+    12
+  );
+
   for (let index = 0; index <= 4; index += 1) {
-    const y = 18 + (chartHeight / 4) * index;
+    const y = 24 + (chartHeight / 4) * index;
     context.beginPath();
     context.moveTo(padding, y);
     context.lineTo(width - padding, y);
@@ -1290,15 +1347,20 @@ function drawChart() {
   const groupWidth = chartWidth / summary.length;
 
   summary.forEach((item, index) => {
+    const incoming =
+      chartCurrency === "USD" ? item.in : item.inIdr;
+    const outgoing =
+      chartCurrency === "USD" ? item.out : item.outIdr;
+
     const barX = padding + index * groupWidth + groupWidth * 0.18;
     const barWidth = groupWidth * 0.24;
-    const inHeight = (item.in / maximum) * chartHeight;
-    const outHeight = (item.out / maximum) * chartHeight;
+    const inHeight = (incoming / maximum) * chartHeight;
+    const outHeight = (outgoing / maximum) * chartHeight;
 
     context.fillStyle = "#16803d";
     context.fillRect(
       barX,
-      18 + chartHeight - inHeight,
+      24 + chartHeight - inHeight,
       barWidth,
       inHeight
     );
@@ -1306,7 +1368,7 @@ function drawChart() {
     context.fillStyle = "#c62828";
     context.fillRect(
       barX + barWidth + 5,
-      18 + chartHeight - outHeight,
+      24 + chartHeight - outHeight,
       barWidth,
       outHeight
     );
