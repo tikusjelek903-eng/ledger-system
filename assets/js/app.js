@@ -755,6 +755,15 @@ function rows() {
   let balanceUsdt = 0;
   let balanceIdr = 0;
 
+  const accountBalances = new Map();
+
+  getFilteredWallets().forEach(wallet => {
+    accountBalances.set(
+      `wallet:${String(wallet.id)}`,
+      Number(wallet.balance || 0)
+    );
+  });
+
   return [...getFilteredTransactions()]
     .sort(
       (a, b) =>
@@ -763,18 +772,88 @@ function rows() {
     )
     .map(transaction => {
       const direction = transaction.type === "in" ? 1 : -1;
+      const currency = transactionCurrency(transaction);
+      const amount = transactionPaymentAmount(transaction);
+      const wallet = getTransactionWallet(transaction);
 
+      // Tetap simpan total berjalan per mata uang untuk kompatibilitas.
       balanceUsd += direction * actualUsdAmount(transaction);
       balanceUsdt += direction * actualUsdtAmount(transaction);
       balanceIdr += direction * actualIdrAmount(transaction);
+
+      // Saldo utama pada Ledger dihitung khusus untuk rekening transaksi.
+      const accountKey = wallet
+        ? `wallet:${String(wallet.id)}`
+        : `legacy:${transaction.storeId}:${currency}:${transaction.wallet}`;
+
+      if (!accountBalances.has(accountKey)) {
+        accountBalances.set(
+          accountKey,
+          wallet ? Number(wallet.balance || 0) : 0
+        );
+      }
+
+      const accountRunningBalance =
+        Number(accountBalances.get(accountKey) || 0) +
+        direction * amount;
+
+      accountBalances.set(accountKey, accountRunningBalance);
 
       return {
         ...transaction,
         balance: balanceUsd,
         usdtBalance: balanceUsdt,
-        idrBalance: balanceIdr
+        idrBalance: balanceIdr,
+        accountRunningBalance,
+        accountCurrency: wallet?.currency || currency,
+        accountLabel: wallet
+          ? accountDisplayName(wallet)
+          : String(transaction.wallet || "Rekening")
       };
     });
+}
+
+
+function accountRunningBalanceHtml(transaction) {
+  const currency =
+    transaction.accountCurrency || transactionCurrency(transaction);
+  const value = Number(transaction.accountRunningBalance || 0);
+
+  let formatted = usd(value);
+
+  if (currency === "IDR") {
+    formatted = idr(value);
+  } else if (currency === "USDT") {
+    formatted = usdt(value);
+  }
+
+  return `
+    <span class="money-primary">${formatted}</span>
+    <span class="money-secondary">
+      Saldo ${esc(currency)} setelah transaksi
+    </span>
+  `;
+}
+
+function ensureLedgerLayout() {
+  const body = document.getElementById("ledgerBody");
+  const table = body?.closest("table");
+  const head = table?.querySelector("thead");
+
+  if (!head) return;
+
+  head.innerHTML = `
+    <tr>
+      <th>Tanggal</th>
+      <th>Keterangan</th>
+      <th>Rekening</th>
+      <th>Rate</th>
+      <th>Masuk</th>
+      <th>Keluar</th>
+      <th>Saldo Rekening</th>
+      <th>Aksi</th>
+    </tr>
+  `;
 }
 
 function walletBalance(wallet) {
@@ -2015,6 +2094,7 @@ function render() {
   setText("summaryRate", idr(currentRate));
   setText("summaryWallets", filteredWallets.length);
 
+  ensureLedgerLayout();
   renderRecent(calculatedRows);
   renderLedger(calculatedRows);
   renderWallets();
@@ -2060,11 +2140,7 @@ function renderRecent(calculatedRows) {
           ${paymentMoneyHtml(transaction)}
         </td>
         <td>
-          ${dualMoneyHtml(
-            transaction.balance,
-            transaction.usdtBalance,
-            transaction.idrBalance
-          )}
+          ${accountRunningBalanceHtml(transaction)}
         </td>
       `;
 
@@ -2073,6 +2149,8 @@ function renderRecent(calculatedRows) {
 }
 
 function renderLedger(calculatedRows = rows()) {
+  ensureLedgerLayout();
+
   const search =
     document.getElementById("searchLedger")?.value.toLowerCase() || "";
   const walletFilter =
@@ -2128,13 +2206,8 @@ function renderLedger(calculatedRows = rows()) {
           }
         </td>
         <td>
-          ${dualMoneyHtml(
-            transaction.balance,
-            transaction.usdtBalance,
-            transaction.idrBalance
-          )}
+          ${accountRunningBalanceHtml(transaction)}
         </td>
-        <td>${idr(transaction.idrBalance)}</td>
         <td>
           <div class="action-group">
             <button class="icon-action" onclick="editTx(${transaction.id})">
