@@ -176,13 +176,25 @@ wallets = wallets.map(wallet => ({
       : wallet.storeId
 }));
 
-transactions = transactions.map(transaction => ({
-  ...transaction,
-  storeId:
-    !transaction.storeId || transaction.storeId === "toko-utama"
-      ? "toko-g"
-      : transaction.storeId
-}));
+transactions = transactions.map(transaction => {
+  const rate = Number(transaction.rate || settings.defaultRate || 0);
+  const amount = Number(transaction.amount || 0);
+  const savedIdr = Number(transaction.amountIdr);
+
+  return {
+    ...transaction,
+    rate,
+    amount,
+    amountIdr:
+      Number.isFinite(savedIdr) && savedIdr > 0
+        ? savedIdr
+        : Math.round(amount * rate),
+    storeId:
+      !transaction.storeId || transaction.storeId === "toko-utama"
+        ? "toko-g"
+        : transaction.storeId
+  };
+});
 
 seedStores.forEach(store => {
   [
@@ -244,6 +256,56 @@ function idr(value) {
   }).format(Number(value || 0));
 }
 
+function transactionUsd(transaction) {
+  const amount = Number(transaction?.amount);
+  if (Number.isFinite(amount)) return amount;
+
+  const rate = Number(transaction?.rate || settings.defaultRate || 0);
+  const amountIdr = Number(transaction?.amountIdr || 0);
+
+  return rate > 0 ? amountIdr / rate : 0;
+}
+
+function transactionIdr(transaction) {
+  const amountIdr = Number(transaction?.amountIdr);
+  if (Number.isFinite(amountIdr) && amountIdr > 0) return amountIdr;
+
+  return Math.round(
+    transactionUsd(transaction) *
+      Number(transaction?.rate || settings.defaultRate || 0)
+  );
+}
+
+function dualMoneyHtml(usdValue, idrValue) {
+  return `
+    <span class="money-primary">${usd(usdValue)}</span>
+    <span class="money-secondary">${idr(idrValue)}</span>
+  `;
+}
+
+function setDualDashboardValue(id, usdValue, idrValue) {
+  const element = document.getElementById(id);
+  if (!element) return;
+
+  element.textContent = usd(usdValue);
+
+  const parent = element.parentElement;
+  if (!parent) return;
+
+  let secondary = parent.querySelector(
+    `[data-secondary-money="${id}"]`
+  );
+
+  if (!secondary) {
+    secondary = document.createElement("small");
+    secondary.dataset.secondaryMoney = id;
+    secondary.className = "dashboard-idr-value";
+    element.insertAdjacentElement("afterend", secondary);
+  }
+
+  secondary.textContent = idr(idrValue);
+}
+
 function dateLabel(value) {
   return new Date(`${value}T00:00:00`).toLocaleDateString(
     settings.dateFormat || "id-ID",
@@ -296,7 +358,8 @@ function getFilteredWallets() {
 }
 
 function rows() {
-  let balance = 0;
+  let balanceUsd = 0;
+  let balanceIdr = 0;
 
   return [...getFilteredTransactions()]
     .sort(
@@ -305,15 +368,19 @@ function rows() {
         Number(a.id) - Number(b.id)
     )
     .map(transaction => {
-      balance +=
-        transaction.type === "in"
-          ? Number(transaction.amount)
-          : -Number(transaction.amount);
+      const amountUsd = transactionUsd(transaction);
+      const amountIdr = transactionIdr(transaction);
+      const direction = transaction.type === "in" ? 1 : -1;
+
+      balanceUsd += direction * amountUsd;
+      balanceIdr += direction * amountIdr;
 
       return {
         ...transaction,
-        balance,
-        idrBalance: balance * Number(transaction.rate || 0)
+        amount: amountUsd,
+        amountIdr,
+        balance: balanceUsd,
+        idrBalance: balanceIdr
       };
     });
 }
@@ -329,12 +396,35 @@ function walletBalance(wallet) {
       (total, transaction) =>
         total +
         (transaction.type === "in"
-          ? Number(transaction.amount)
-          : -Number(transaction.amount)),
+          ? transactionUsd(transaction)
+          : -transactionUsd(transaction)),
       0
     );
 
   return transactionBalance + Number(wallet.balance || 0);
+}
+
+function walletBalanceIdr(wallet) {
+  const transactionBalance = transactions
+    .filter(
+      transaction =>
+        transaction.storeId === wallet.storeId &&
+        transaction.wallet === wallet.name
+    )
+    .reduce(
+      (total, transaction) =>
+        total +
+        (transaction.type === "in"
+          ? transactionIdr(transaction)
+          : -transactionIdr(transaction)),
+      0
+    );
+
+  const initialIdr =
+    Number(wallet.balance || 0) *
+    Number(settings.defaultRate || 0);
+
+  return transactionBalance + initialIdr;
 }
 
 function monthly() {
@@ -348,12 +438,18 @@ function monthly() {
         month: monthKey,
         in: 0,
         out: 0,
+        inIdr: 0,
+        outIdr: 0,
         count: 0
       };
     }
 
     result[monthKey].count += 1;
-    result[monthKey][transaction.type] += Number(transaction.amount);
+    result[monthKey][transaction.type] +=
+      transactionUsd(transaction);
+
+    result[monthKey][`${transaction.type}Idr`] +=
+      transactionIdr(transaction);
   });
 
   return Object.values(result).sort((a, b) =>
@@ -386,6 +482,47 @@ function injectStoreStyles() {
       color: var(--muted, #6b778c);
       font-size: 11px;
       font-weight: 600;
+    }
+
+    .money-primary {
+      display: block;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .money-secondary,
+    .dashboard-idr-value {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted, #6b778c);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .green .money-secondary,
+    .red .money-secondary {
+      color: inherit;
+      opacity: 0.78;
+    }
+
+    .wallet-money {
+      margin-top: 10px;
+    }
+
+    .wallet-money .money-primary {
+      font-size: 20px;
+    }
+
+    .currency-field-generated input {
+      width: 100%;
+    }
+
+    .currency-helper {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted, #6b778c);
+      font-size: 11px;
     }
 
     @media (max-width: 760px) {
@@ -446,6 +583,149 @@ function populateStores() {
   };
 }
 
+function numericValue(value) {
+  const normalized = String(value ?? "")
+    .replaceAll(".", "")
+    .replace(",", ".")
+    .trim();
+
+  const direct = Number(value);
+  if (Number.isFinite(direct)) return direct;
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function fieldWrapper(input) {
+  return (
+    input.closest(
+      ".form-field, .field, .form-group, .input-group, .control"
+    ) || input.parentElement
+  );
+}
+
+function injectCurrencyFields() {
+  ["transactionForm", "cashInForm", "cashOutForm"].forEach(formId => {
+    const form = document.getElementById(formId);
+    if (!form) return;
+
+    const amountInput = form.querySelector('[name="amount"]');
+    const rateInput = form.querySelector('[name="rate"]');
+
+    if (!amountInput || !rateInput) return;
+
+    amountInput.step = "any";
+    amountInput.inputMode = "decimal";
+
+    const usdWrapper = fieldWrapper(amountInput);
+    const usdLabel = usdWrapper?.querySelector("label");
+
+    if (usdLabel) usdLabel.textContent = "Nominal USD";
+
+    let idrInput = form.querySelector('[name="amountIdr"]');
+
+    if (!idrInput) {
+      const idrWrapper = document.createElement("div");
+      idrWrapper.className = `${
+        usdWrapper?.className || ""
+      } currency-field-generated`.trim();
+
+      idrWrapper.innerHTML = `
+        <label>Nominal IDR</label>
+        <input
+          type="number"
+          name="amountIdr"
+          min="0"
+          step="1"
+          inputmode="numeric"
+          placeholder="Contoh: 1.000.000"
+        />
+        <small class="currency-helper">
+          Isi USD atau IDR, nominal lainnya otomatis terhitung.
+        </small>
+      `;
+
+      usdWrapper?.insertAdjacentElement("afterend", idrWrapper);
+      idrInput = form.querySelector('[name="amountIdr"]');
+    }
+
+    if (!idrInput || form.dataset.currencyBound === "true") return;
+
+    form.dataset.currencyBound = "true";
+    form.dataset.currencySource = "usd";
+
+    let syncing = false;
+
+    const syncFromUsd = () => {
+      if (syncing) return;
+      syncing = true;
+
+      const amountUsd = Number(amountInput.value || 0);
+      const rate = Number(rateInput.value || settings.defaultRate || 0);
+
+      idrInput.value =
+        amountUsd > 0 && rate > 0
+          ? String(Math.round(amountUsd * rate))
+          : "";
+
+      syncing = false;
+    };
+
+    const syncFromIdr = () => {
+      if (syncing) return;
+      syncing = true;
+
+      const amountIdr = Number(idrInput.value || 0);
+      const rate = Number(rateInput.value || settings.defaultRate || 0);
+
+      amountInput.value =
+        amountIdr > 0 && rate > 0
+          ? String(Number((amountIdr / rate).toFixed(2)))
+          : "";
+
+      syncing = false;
+    };
+
+    amountInput.addEventListener("input", () => {
+      form.dataset.currencySource = "usd";
+      syncFromUsd();
+    });
+
+    idrInput.addEventListener("input", () => {
+      form.dataset.currencySource = "idr";
+      syncFromIdr();
+    });
+
+    rateInput.addEventListener("input", () => {
+      if (form.dataset.currencySource === "idr") {
+        syncFromIdr();
+      } else {
+        syncFromUsd();
+      }
+    });
+  });
+}
+
+function fillCurrencyFields(form, transaction = null) {
+  if (!form) return;
+
+  const amountInput = form.querySelector('[name="amount"]');
+  const amountIdrInput = form.querySelector('[name="amountIdr"]');
+
+  if (!amountInput || !amountIdrInput) return;
+
+  if (!transaction) {
+    amountInput.value = "";
+    amountIdrInput.value = "";
+    form.dataset.currencySource = "usd";
+    return;
+  }
+
+  amountInput.value = transactionUsd(transaction);
+  amountIdrInput.value = Math.round(transactionIdr(transaction));
+  form.dataset.currencySource = "usd";
+}
+
 function showPage(page) {
   document
     .querySelectorAll(".page")
@@ -499,16 +779,42 @@ function render() {
   const totalIn = filteredTransactions
     .filter(transaction => transaction.type === "in")
     .reduce(
-      (total, transaction) => total + Number(transaction.amount),
+      (total, transaction) =>
+        total + transactionUsd(transaction),
       0
     );
 
   const totalOut = filteredTransactions
     .filter(transaction => transaction.type === "out")
     .reduce(
-      (total, transaction) => total + Number(transaction.amount),
+      (total, transaction) =>
+        total + transactionUsd(transaction),
       0
     );
+
+  const totalInIdr = filteredTransactions
+    .filter(transaction => transaction.type === "in")
+    .reduce(
+      (total, transaction) =>
+        total + transactionIdr(transaction),
+      0
+    );
+
+  const totalOutIdr = filteredTransactions
+    .filter(transaction => transaction.type === "out")
+    .reduce(
+      (total, transaction) =>
+        total + transactionIdr(transaction),
+      0
+    );
+
+  const largestTransaction = filteredTransactions.reduce(
+    (largest, transaction) =>
+      transactionUsd(transaction) > transactionUsd(largest)
+        ? transaction
+        : largest,
+    null
+  );
 
   const setText = (id, value) => {
     const element = document.getElementById(id);
@@ -517,20 +823,16 @@ function render() {
 
   setText("dashUsd", usd(last.balance));
   setText("dashIdr", idr(last.idrBalance));
-  setText("dashIn", usd(totalIn));
-  setText("dashOut", usd(totalOut));
+  setDualDashboardValue("dashIn", totalIn, totalInIdr);
+  setDualDashboardValue("dashOut", totalOut, totalOutIdr);
   setText("summaryCount", filteredTransactions.length);
-  setText(
+
+  setDualDashboardValue(
     "summaryLargest",
-    usd(
-      Math.max(
-        0,
-        ...filteredTransactions.map(transaction =>
-          Number(transaction.amount)
-        )
-      )
-    )
+    largestTransaction ? transactionUsd(largestTransaction) : 0,
+    largestTransaction ? transactionIdr(largestTransaction) : 0
   );
+
   setText("summaryRate", idr(last.rate));
   setText("summaryWallets", filteredWallets.length);
 
@@ -576,9 +878,17 @@ function renderRecent(calculatedRows) {
           </span>
         </td>
         <td class="${transaction.type === "in" ? "green" : "red"}">
-          ${usd(transaction.amount)}
+          ${dualMoneyHtml(
+            transaction.amount,
+            transaction.amountIdr
+          )}
         </td>
-        <td><strong>${usd(transaction.balance)}</strong></td>
+        <td>
+          ${dualMoneyHtml(
+            transaction.balance,
+            transaction.idrBalance
+          )}
+        </td>
       `;
 
       body.appendChild(row);
@@ -624,12 +934,31 @@ function renderLedger(calculatedRows = rows()) {
         <td>${esc(transaction.wallet)}</td>
         <td>${idr(transaction.rate)}</td>
         <td class="green">
-          ${transaction.type === "in" ? usd(transaction.amount) : "-"}
+          ${
+            transaction.type === "in"
+              ? dualMoneyHtml(
+                  transaction.amount,
+                  transaction.amountIdr
+                )
+              : "-"
+          }
         </td>
         <td class="red">
-          ${transaction.type === "out" ? usd(transaction.amount) : "-"}
+          ${
+            transaction.type === "out"
+              ? dualMoneyHtml(
+                  transaction.amount,
+                  transaction.amountIdr
+                )
+              : "-"
+          }
         </td>
-        <td><strong>${usd(transaction.balance)}</strong></td>
+        <td>
+          ${dualMoneyHtml(
+            transaction.balance,
+            transaction.idrBalance
+          )}
+        </td>
         <td>${idr(transaction.idrBalance)}</td>
         <td>
           <div class="action-group">
@@ -672,7 +1001,12 @@ function renderWallets() {
         </div>
         <span class="wallet-dot ${wallet.color}"></span>
       </div>
-      <strong>${usd(walletBalance(wallet))}</strong>
+      <div class="wallet-money">
+        ${dualMoneyHtml(
+          walletBalance(wallet),
+          walletBalanceIdr(wallet)
+        )}
+      </div>
       <small>Saldo wallet</small>
     `;
 
@@ -708,7 +1042,12 @@ function renderQuickLists() {
               }
             </small>
           </div>
-          <strong class="green">${usd(transaction.amount)}</strong>
+          <div class="green">
+            ${dualMoneyHtml(
+              transactionUsd(transaction),
+              transactionIdr(transaction)
+            )}
+          </div>
         </div>
       `;
     });
@@ -731,7 +1070,12 @@ function renderQuickLists() {
               }
             </small>
           </div>
-          <strong class="red">${usd(transaction.amount)}</strong>
+          <div class="red">
+            ${dualMoneyHtml(
+              transactionUsd(transaction),
+              transactionIdr(transaction)
+            )}
+          </div>
         </div>
       `;
     });
@@ -745,7 +1089,9 @@ function renderReports() {
     body.innerHTML = "";
 
     summary.forEach(item => {
-      const net = item.in - item.out;
+      const netUsd = item.in - item.out;
+      const netIdr = item.inIdr - item.outIdr;
+
       const label = new Date(
         `${item.month}-01T00:00:00`
       ).toLocaleDateString("id-ID", {
@@ -756,9 +1102,15 @@ function renderReports() {
       body.innerHTML += `
         <tr>
           <td>${label}</td>
-          <td class="green">${usd(item.in)}</td>
-          <td class="red">${usd(item.out)}</td>
-          <td class="${net >= 0 ? "green" : "red"}">${usd(net)}</td>
+          <td class="green">
+            ${dualMoneyHtml(item.in, item.inIdr)}
+          </td>
+          <td class="red">
+            ${dualMoneyHtml(item.out, item.outIdr)}
+          </td>
+          <td class="${netUsd >= 0 ? "green" : "red"}">
+            ${dualMoneyHtml(netUsd, netIdr)}
+          </td>
           <td>${item.count}</td>
         </tr>
       `;
@@ -768,17 +1120,28 @@ function renderReports() {
   const currentMonth = new Date().toISOString().slice(0, 7);
   const current = summary.find(item => item.month === currentMonth) || {
     in: 0,
-    out: 0
+    out: 0,
+    inIdr: 0,
+    outIdr: 0
   };
 
-  const setText = (id, value) => {
-    const element = document.getElementById(id);
-    if (element) element.textContent = value;
-  };
+  setDualDashboardValue(
+    "reportIn",
+    current.in,
+    current.inIdr
+  );
 
-  setText("reportIn", usd(current.in));
-  setText("reportOut", usd(current.out));
-  setText("reportNet", usd(current.in - current.out));
+  setDualDashboardValue(
+    "reportOut",
+    current.out,
+    current.outIdr
+  );
+
+  setDualDashboardValue(
+    "reportNet",
+    current.in - current.out,
+    current.inIdr - current.outIdr
+  );
 }
 
 function populateWallets() {
@@ -928,8 +1291,9 @@ function openModal(item = null) {
   form.type.value = item?.type || "in";
   form.rate.value = item?.rate || settings.defaultRate;
   form.note.value = item?.note || "";
-  form.amount.value = item?.amount || "";
   form.reference.value = item?.reference || "";
+
+  fillCurrencyFields(form, item);
 
   document.getElementById("transactionModal")?.classList.add("show");
 }
@@ -951,13 +1315,30 @@ function saveTx(data, typeOverride = null) {
     return false;
   }
 
+  const rate =
+    Number(data.get("rate")) ||
+    Number(settings.defaultRate) ||
+    0;
+
+  let amountUsd = Number(data.get("amount") || 0);
+  let amountIdr = Number(data.get("amountIdr") || 0);
+
+  if (amountUsd <= 0 && amountIdr > 0 && rate > 0) {
+    amountUsd = Number((amountIdr / rate).toFixed(2));
+  }
+
+  if (amountIdr <= 0 && amountUsd > 0 && rate > 0) {
+    amountIdr = Math.round(amountUsd * rate);
+  }
+
   const transaction = {
     date: data.get("date"),
     wallet: data.get("wallet"),
     type: typeOverride || data.get("type"),
-    rate: Number(data.get("rate")),
+    rate,
     note: String(data.get("note") || "").trim(),
-    amount: Number(data.get("amount")),
+    amount: amountUsd,
+    amountIdr,
     reference: String(data.get("reference") || "").trim(),
     storeId
   };
@@ -967,9 +1348,9 @@ function saveTx(data, typeOverride = null) {
     !transaction.wallet ||
     !transaction.note ||
     !transaction.rate ||
-    !transaction.amount
+    (transaction.amount <= 0 && transaction.amountIdr <= 0)
   ) {
-    alert("Lengkapi semua data wajib.");
+    alert("Lengkapi data wajib dan isi Nominal USD atau IDR.");
     return false;
   }
 
@@ -1053,8 +1434,9 @@ function exportAll() {
         "Keterangan",
         "Wallet",
         "Tipe",
-        "Rate",
-        "Nominal"
+        "Rate USD/IDR",
+        "Nominal USD",
+        "Nominal IDR"
       ],
       ...filteredTransactions.map(transaction => [
         getStoreName(transaction.storeId),
@@ -1063,7 +1445,8 @@ function exportAll() {
         transaction.wallet,
         transaction.type,
         transaction.rate,
-        transaction.amount
+        transactionUsd(transaction),
+        transactionIdr(transaction)
       ])
     ]
   );
@@ -1071,12 +1454,24 @@ function exportAll() {
 
 function exportReport() {
   exportCsv("ledger-pro-report.csv", [
-    ["Bulan", "Masuk", "Keluar", "Net", "Jumlah"],
+    [
+      "Bulan",
+      "Masuk USD",
+      "Masuk IDR",
+      "Keluar USD",
+      "Keluar IDR",
+      "Net USD",
+      "Net IDR",
+      "Jumlah"
+    ],
     ...monthly().map(item => [
       item.month,
       item.in,
+      item.inIdr,
       item.out,
+      item.outIdr,
       item.in - item.out,
+      item.inIdr - item.outIdr,
       item.count
     ])
   ]);
@@ -1158,6 +1553,7 @@ function bindEvents() {
           .toISOString()
           .slice(0, 10);
         event.target.rate.value = settings.defaultRate;
+        fillCurrencyFields(event.target);
       }
     });
 
@@ -1174,6 +1570,7 @@ function bindEvents() {
           .toISOString()
           .slice(0, 10);
         event.target.rate.value = settings.defaultRate;
+        fillCurrencyFields(event.target);
       }
     });
 
@@ -1284,6 +1681,7 @@ function initialize() {
   injectStoreStyles();
   ensureStoreSelector();
   populateStores();
+  injectCurrencyFields();
   bindEvents();
 
   document
