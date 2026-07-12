@@ -31,25 +31,49 @@ if (
   activeStoreId = "all";
 }
 
-const seedWallets = seedStores.flatMap((store, index) => [
+const seedWallets = seedStores.flatMap(store => [
   {
-    id: `${store.id}-ledger`,
-    name: "Ledger",
+    id: `${store.id}-utama-ledger-usd`,
+    ownerName: "Rekening Utama",
+    institution: "Ledger",
+    accountNumber: "",
+    currency: "USD",
+    name: "Rekening Utama — Ledger",
     type: "Crypto",
     balance: 0,
     color: "blue",
     storeId: store.id
   },
   {
-    id: `${store.id}-bca`,
-    name: "BCA",
+    id: `${store.id}-utama-binance-usdt`,
+    ownerName: "Rekening Utama",
+    institution: "Binance",
+    accountNumber: "",
+    currency: "USDT",
+    name: "Rekening Utama — Binance",
+    type: "Crypto",
+    balance: 0,
+    color: "blue",
+    storeId: store.id
+  },
+  {
+    id: `${store.id}-utama-bca-idr`,
+    ownerName: "Rekening Utama",
+    institution: "BCA",
+    accountNumber: "",
+    currency: "IDR",
+    name: "Rekening Utama — BCA",
     type: "Bank",
     balance: 0,
     color: "green",
     storeId: store.id
   },
   {
-    id: `${store.id}-kas`,
+    id: `${store.id}-kas-idr`,
+    ownerName: "Kas",
+    institution: "Kas",
+    accountNumber: "",
+    currency: "IDR",
     name: "Kas",
     type: "Kas",
     balance: 0,
@@ -184,23 +208,17 @@ let settings = safeParse(
 );
 let editingId = null;
 
-wallets = wallets.map(wallet => ({
-  ...wallet,
-  storeId:
-    !wallet.storeId || wallet.storeId === "toko-utama"
-      ? "toko-g"
-      : wallet.storeId
-}));
-
 transactions = transactions.map(transaction => {
   const rate = Number(transaction.rate || settings.defaultRate || 0);
   const storedUsd = Number(transaction.amount || 0);
   const storedIdr = Number(transaction.amountIdr);
-  const currency =
-    transaction.currency === "IDR" ||
-    transaction.paymentCurrency === "IDR"
-      ? "IDR"
-      : "USD";
+  const rawCurrency = String(
+    transaction.currency || transaction.paymentCurrency || "USD"
+  ).toUpperCase();
+
+  const currency = ["USD", "USDT", "IDR"].includes(rawCurrency)
+    ? rawCurrency
+    : "USD";
 
   const amountUsd = Number.isFinite(storedUsd) ? storedUsd : 0;
   const amountIdr =
@@ -230,29 +248,153 @@ transactions = transactions.map(transaction => {
   };
 });
 
-seedStores.forEach(store => {
-  [
-    { name: "Ledger", type: "Crypto", color: "blue" },
-    { name: "BCA", type: "Bank", color: "green" },
-    { name: "Kas", type: "Kas", color: "orange" }
-  ].forEach(defaultWallet => {
-    const exists = wallets.some(
-      wallet =>
-        wallet.storeId === store.id &&
-        wallet.name.toLowerCase() === defaultWallet.name.toLowerCase()
+function inferredAccountCurrency(wallet, relatedCurrencies = []) {
+  const explicit = String(wallet.currency || "").toUpperCase();
+  if (["USD", "USDT", "IDR"].includes(explicit)) return explicit;
+
+  if (relatedCurrencies.length === 1) return relatedCurrencies[0];
+
+  const source = `${wallet.name || ""} ${wallet.type || ""}`.toLowerCase();
+  if (source.includes("usdt") || source.includes("binance")) return "USDT";
+  if (source.includes("bca") || source.includes("bank") || source.includes("kas")) {
+    return "IDR";
+  }
+
+  return "USD";
+}
+
+const migratedWallets = [];
+
+wallets.forEach((wallet, walletIndex) => {
+  const storeId =
+    !wallet.storeId || wallet.storeId === "toko-utama"
+      ? "toko-g"
+      : wallet.storeId;
+
+  const legacyName = String(
+    wallet.legacyName || wallet.name || wallet.institution || "Rekening"
+  ).trim();
+
+  const relatedCurrencies = [
+    ...new Set(
+      transactions
+        .filter(transaction =>
+          transaction.storeId === storeId &&
+          (
+            transaction.walletId === wallet.id ||
+            transaction.wallet === legacyName ||
+            transaction.wallet === wallet.name
+          )
+        )
+        .map(transaction => transaction.currency)
+        .filter(currency => ["USD", "USDT", "IDR"].includes(currency))
+    )
+  ];
+
+  const explicitCurrency = String(wallet.currency || "").toUpperCase();
+  const currencies = ["USD", "USDT", "IDR"].includes(explicitCurrency)
+    ? [...new Set([explicitCurrency, ...relatedCurrencies])]
+    : relatedCurrencies.length
+      ? relatedCurrencies
+      : [inferredAccountCurrency(wallet, relatedCurrencies)];
+
+  const institution = String(
+    wallet.institution ||
+    wallet.bank ||
+    wallet.platform ||
+    legacyName ||
+    "Rekening"
+  ).trim();
+
+  const defaultOwner =
+    institution.toLowerCase() === "kas"
+      ? "Kas"
+      : "Rekening Utama";
+
+  const ownerName = String(
+    wallet.ownerName ||
+    wallet.accountOwner ||
+    defaultOwner
+  ).trim();
+
+  const accountNumber = String(
+    wallet.accountNumber ||
+    wallet.accountNo ||
+    wallet.number ||
+    ""
+  ).trim();
+
+  currencies.forEach((currency, currencyIndex) => {
+    const displayName =
+      ownerName.toLowerCase() === institution.toLowerCase()
+        ? ownerName
+        : `${ownerName} — ${institution}`;
+
+    migratedWallets.push({
+      ...wallet,
+      id:
+        currencyIndex === 0
+          ? String(wallet.id || `${storeId}-rekening-${walletIndex}`)
+          : `${wallet.id || `${storeId}-rekening-${walletIndex}`}-${currency.toLowerCase()}`,
+      legacyId: wallet.legacyId || wallet.id || null,
+      legacyName,
+      ownerName,
+      institution,
+      accountNumber,
+      currency,
+      name: displayName,
+      type: wallet.type || (currency === "USDT" ? "Crypto" : "Bank"),
+      balance: currencyIndex === 0 ? Number(wallet.balance || 0) : 0,
+      color: wallet.color || (currency === "IDR" ? "green" : "blue"),
+      storeId
+    });
+  });
+});
+
+wallets = migratedWallets;
+
+seedWallets.forEach(seedWallet => {
+  const exists = wallets.some(wallet =>
+    wallet.storeId === seedWallet.storeId &&
+    wallet.ownerName.toLowerCase() === seedWallet.ownerName.toLowerCase() &&
+    wallet.institution.toLowerCase() === seedWallet.institution.toLowerCase() &&
+    wallet.currency === seedWallet.currency
+  );
+
+  if (!exists) {
+    wallets.push(structuredClone(seedWallet));
+  }
+});
+
+transactions = transactions.map(transaction => {
+  const matchingWallet =
+    wallets.find(wallet =>
+      wallet.storeId === transaction.storeId &&
+      wallet.currency === transaction.currency &&
+      (
+        wallet.id === transaction.walletId ||
+        wallet.legacyId === transaction.walletId ||
+        wallet.legacyName === transaction.wallet ||
+        wallet.name === transaction.wallet ||
+        wallet.institution === transaction.wallet
+      )
+    ) ||
+    wallets.find(wallet =>
+      wallet.storeId === transaction.storeId &&
+      wallet.currency === transaction.currency
     );
 
-    if (!exists) {
-      wallets.push({
-        id: `${store.id}-${defaultWallet.name.toLowerCase()}-${Date.now()}`,
-        name: defaultWallet.name,
-        type: defaultWallet.type,
-        balance: 0,
-        color: defaultWallet.color,
-        storeId: store.id
-      });
-    }
-  });
+  if (!matchingWallet) return transaction;
+
+  return {
+    ...transaction,
+    walletId: matchingWallet.id,
+    wallet:
+      matchingWallet.ownerName.toLowerCase() ===
+      matchingWallet.institution.toLowerCase()
+        ? matchingWallet.ownerName
+        : `${matchingWallet.ownerName} — ${matchingWallet.institution}`
+  };
 });
 
 const meta = {
@@ -260,7 +402,7 @@ const meta = {
   ledger: ["Ledger", "Kelola seluruh transaksi."],
   cashin: ["Cash In", "Tambah dan pantau uang masuk."],
   cashout: ["Cash Out", "Tambah dan pantau uang keluar."],
-  wallets: ["Wallet", "Kelola bank, crypto wallet, dan kas."],
+  wallets: ["Rekening", "Kelola rekening berdasarkan pemilik, bank/platform, dan mata uang."],
   reports: ["Laporan", "Rekap keuangan bulanan."],
   settings: ["Pengaturan", "Atur preferensi aplikasi."]
 };
@@ -290,8 +432,17 @@ function idr(value) {
   }).format(Number(value || 0));
 }
 
+function usdt(value) {
+  return `USDT ${new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6
+  }).format(Number(value || 0))}`;
+}
+
+
 function transactionCurrency(transaction) {
-  return transaction?.currency === "IDR" ? "IDR" : "USD";
+  const currency = String(transaction?.currency || "USD").toUpperCase();
+  return ["USD", "USDT", "IDR"].includes(currency) ? currency : "USD";
 }
 
 function transactionPaymentAmount(transaction) {
@@ -305,30 +456,28 @@ function transactionPaymentAmount(transaction) {
 }
 
 function transactionUsd(transaction) {
-  const storedUsd = Number(transaction?.amount);
-  if (Number.isFinite(storedUsd)) return storedUsd;
-
   const rate = Number(transaction?.rate || settings.defaultRate || 0);
-  const paymentAmount = Number(transaction?.paymentAmount || 0);
+  const currency = transactionCurrency(transaction);
+  const paymentAmount = transactionPaymentAmount(transaction);
 
-  if (transactionCurrency(transaction) === "IDR") {
-    return rate > 0 ? paymentAmount / rate : 0;
-  }
-
-  return paymentAmount;
+  if (currency === "USD") return paymentAmount;
+  if (currency === "USDT") return paymentAmount;
+  return rate > 0 ? paymentAmount / rate : 0;
 }
 
+function transactionUsdt(transaction) {
+  return transactionCurrency(transaction) === "USDT"
+    ? transactionPaymentAmount(transaction)
+    : 0;
+}
+
+
 function transactionIdr(transaction) {
-  const storedIdr = Number(transaction?.amountIdr);
-  if (Number.isFinite(storedIdr)) return storedIdr;
-
   const rate = Number(transaction?.rate || settings.defaultRate || 0);
-  const paymentAmount = Number(transaction?.paymentAmount || 0);
+  const currency = transactionCurrency(transaction);
+  const paymentAmount = transactionPaymentAmount(transaction);
 
-  if (transactionCurrency(transaction) === "IDR") {
-    return paymentAmount;
-  }
-
+  if (currency === "IDR") return paymentAmount;
   return Math.round(paymentAmount * rate);
 }
 
@@ -338,16 +487,24 @@ function actualUsdAmount(transaction) {
     : 0;
 }
 
+function actualUsdtAmount(transaction) {
+  return transactionCurrency(transaction) === "USDT"
+    ? transactionPaymentAmount(transaction)
+    : 0;
+}
+
+
 function actualIdrAmount(transaction) {
   return transactionCurrency(transaction) === "IDR"
     ? transactionPaymentAmount(transaction)
     : 0;
 }
 
-function dualMoneyHtml(usdValue, idrValue) {
+function dualMoneyHtml(usdValue, usdtValue, idrValue) {
   return `
-    <span class="money-primary">USD ${usd(usdValue)}</span>
-    <span class="money-secondary">IDR ${idr(idrValue)}</span>
+    <span class="money-primary">${usd(usdValue)}</span>
+    <span class="money-usdt">${usdt(usdtValue)}</span>
+    <span class="money-secondary">${idr(idrValue)}</span>
   `;
 }
 
@@ -362,13 +519,20 @@ function paymentMoneyHtml(transaction) {
     `;
   }
 
+  if (currency === "USDT") {
+    return `
+      <span class="money-primary">${usdt(paymentAmount)}</span>
+      <span class="money-secondary">Pembayaran USDT</span>
+    `;
+  }
+
   return `
     <span class="money-primary">${usd(paymentAmount)}</span>
     <span class="money-secondary">Pembayaran USD</span>
   `;
 }
 
-function setDualDashboardValue(id, usdValue, idrValue) {
+function setDualDashboardValue(id, usdValue, usdtValue, idrValue) {
   const element = document.getElementById(id);
   if (!element) return;
 
@@ -377,24 +541,30 @@ function setDualDashboardValue(id, usdValue, idrValue) {
   const parent = element.parentElement;
   if (!parent) return;
 
-  let secondary = parent.querySelector(
-    `[data-secondary-money="${id}"]`
-  );
-
-  if (!secondary) {
-    secondary = document.createElement("small");
-    secondary.dataset.secondaryMoney = id;
-    secondary.className = "dashboard-idr-value";
-    element.insertAdjacentElement("afterend", secondary);
+  let usdtLine = parent.querySelector(`[data-usdt-money="${id}"]`);
+  if (!usdtLine) {
+    usdtLine = document.createElement("small");
+    usdtLine.dataset.usdtMoney = id;
+    usdtLine.className = "dashboard-usdt-value";
+    element.insertAdjacentElement("afterend", usdtLine);
   }
+  usdtLine.textContent = usdt(usdtValue);
 
-  secondary.textContent = idr(idrValue);
+  let idrLine = parent.querySelector(`[data-secondary-money="${id}"]`);
+  if (!idrLine) {
+    idrLine = document.createElement("small");
+    idrLine.dataset.secondaryMoney = id;
+    idrLine.className = "dashboard-idr-value";
+    usdtLine.insertAdjacentElement("afterend", idrLine);
+  }
+  idrLine.textContent = idr(idrValue);
 }
 
 function setCombinedIdrDashboardValue(
   id,
   combinedIdr,
   usdAmount,
+  usdtAmount,
   nativeIdrAmount,
   rate
 ) {
@@ -418,7 +588,7 @@ function setCombinedIdrDashboardValue(
   }
 
   secondary.textContent =
-    `${usd(usdAmount)} × ${idr(rate)} + ${idr(nativeIdrAmount)}`;
+    `${usd(usdAmount)} + ${usdt(usdtAmount)} × ${idr(rate)} + ${idr(nativeIdrAmount)}`;
 }
 
 
@@ -473,8 +643,111 @@ function getFilteredWallets() {
   return wallets.filter(wallet => wallet.storeId === activeStoreId);
 }
 
+function accountDisplayName(wallet, includeCurrency = false) {
+  if (!wallet) return "Rekening tidak ditemukan";
+
+  const owner = String(wallet.ownerName || "Rekening").trim();
+  const institution = String(wallet.institution || wallet.name || "").trim();
+  const base =
+    owner.toLowerCase() === institution.toLowerCase() || !institution
+      ? owner
+      : `${owner} — ${institution}`;
+
+  return includeCurrency
+    ? `${base} — ${wallet.currency || "USD"}`
+    : base;
+}
+
+function maskedAccountNumber(value) {
+  const number = String(value || "").replace(/\s+/g, "");
+  if (!number) return "";
+  if (number.length <= 4) return number;
+  return `•••• ${number.slice(-4)}`;
+}
+
+function getWalletById(walletId) {
+  return wallets.find(wallet => String(wallet.id) === String(walletId)) || null;
+}
+
+function getTransactionWallet(transaction) {
+  return (
+    getWalletById(transaction?.walletId) ||
+    wallets.find(wallet =>
+      wallet.storeId === transaction?.storeId &&
+      wallet.currency === transactionCurrency(transaction) &&
+      (
+        wallet.name === transaction?.wallet ||
+        wallet.legacyName === transaction?.wallet ||
+        wallet.institution === transaction?.wallet
+      )
+    ) ||
+    null
+  );
+}
+
+function transactionAccountLabel(transaction) {
+  const wallet = getTransactionWallet(transaction);
+  return wallet
+    ? accountDisplayName(wallet)
+    : String(transaction?.wallet || "Rekening");
+}
+
+function transactionBelongsToWallet(transaction, wallet) {
+  if (!transaction || !wallet) return false;
+
+  if (transaction.walletId) {
+    return String(transaction.walletId) === String(wallet.id);
+  }
+
+  return (
+    transaction.storeId === wallet.storeId &&
+    transactionCurrency(transaction) === wallet.currency &&
+    (
+      transaction.wallet === wallet.name ||
+      transaction.wallet === wallet.legacyName ||
+      transaction.wallet === wallet.institution
+    )
+  );
+}
+
+function accountBalance(wallet) {
+  const openingBalance = Number(wallet?.balance || 0);
+
+  const movement = transactions
+    .filter(transaction =>
+      transactionBelongsToWallet(transaction, wallet) &&
+      transactionCurrency(transaction) === wallet.currency
+    )
+    .reduce(
+      (total, transaction) =>
+        total +
+        (transaction.type === "in"
+          ? transactionPaymentAmount(transaction)
+          : -transactionPaymentAmount(transaction)),
+      0
+    );
+
+  return openingBalance + movement;
+}
+
+function accountBalanceText(wallet) {
+  const balance = accountBalance(wallet);
+
+  if (wallet.currency === "IDR") return idr(balance);
+  if (wallet.currency === "USDT") return usdt(balance);
+  return usd(balance);
+}
+
+function totalAccountBalance(currency) {
+  return getFilteredWallets()
+    .filter(wallet => wallet.currency === currency)
+    .reduce((total, wallet) => total + accountBalance(wallet), 0);
+}
+
+
 function rows() {
   let balanceUsd = 0;
+  let balanceUsdt = 0;
   let balanceIdr = 0;
 
   return [...getFilteredTransactions()]
@@ -487,52 +760,29 @@ function rows() {
       const direction = transaction.type === "in" ? 1 : -1;
 
       balanceUsd += direction * actualUsdAmount(transaction);
+      balanceUsdt += direction * actualUsdtAmount(transaction);
       balanceIdr += direction * actualIdrAmount(transaction);
 
       return {
         ...transaction,
         balance: balanceUsd,
+        usdtBalance: balanceUsdt,
         idrBalance: balanceIdr
       };
     });
 }
 
 function walletBalance(wallet) {
-  const transactionBalance = transactions
-    .filter(
-      transaction =>
-        transaction.storeId === wallet.storeId &&
-        transaction.wallet === wallet.name &&
-        transactionCurrency(transaction) === "USD"
-    )
-    .reduce(
-      (total, transaction) =>
-        total +
-        (transaction.type === "in"
-          ? transactionPaymentAmount(transaction)
-          : -transactionPaymentAmount(transaction)),
-      0
-    );
-
-  return transactionBalance + Number(wallet.balance || 0);
+  return wallet?.currency === "USD" ? accountBalance(wallet) : 0;
 }
 
+function walletBalanceUsdt(wallet) {
+  return wallet?.currency === "USDT" ? accountBalance(wallet) : 0;
+}
+
+
 function walletBalanceIdr(wallet) {
-  return transactions
-    .filter(
-      transaction =>
-        transaction.storeId === wallet.storeId &&
-        transaction.wallet === wallet.name &&
-        transactionCurrency(transaction) === "IDR"
-    )
-    .reduce(
-      (total, transaction) =>
-        total +
-        (transaction.type === "in"
-          ? transactionPaymentAmount(transaction)
-          : -transactionPaymentAmount(transaction)),
-      0
-    );
+  return wallet?.currency === "IDR" ? accountBalance(wallet) : 0;
 }
 
 function monthly() {
@@ -546,6 +796,8 @@ function monthly() {
         month: monthKey,
         in: 0,
         out: 0,
+        inUsdt: 0,
+        outUsdt: 0,
         inIdr: 0,
         outIdr: 0,
         count: 0
@@ -553,13 +805,15 @@ function monthly() {
     }
 
     result[monthKey].count += 1;
+    const currency = transactionCurrency(transaction);
+    const amount = transactionPaymentAmount(transaction);
 
-    if (transactionCurrency(transaction) === "IDR") {
-      result[monthKey][`${transaction.type}Idr`] +=
-        transactionPaymentAmount(transaction);
+    if (currency === "IDR") {
+      result[monthKey][`${transaction.type}Idr`] += amount;
+    } else if (currency === "USDT") {
+      result[monthKey][`${transaction.type}Usdt`] += amount;
     } else {
-      result[monthKey][transaction.type] +=
-        transactionPaymentAmount(transaction);
+      result[monthKey][transaction.type] += amount;
     }
   });
 
@@ -605,6 +859,16 @@ function injectStoreStyles() {
 
     .money-primary {
       display: block;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .money-usdt,
+    .dashboard-usdt-value {
+      display: block;
+      margin-top: 3px;
+      color: #0f766e;
+      font-size: 11px;
       font-weight: 700;
       line-height: 1.25;
     }
@@ -656,6 +920,48 @@ function injectStoreStyles() {
       line-height: 1.35;
     }
 
+
+    .account-form-field {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      margin-bottom: 14px;
+    }
+
+    .account-form-field label {
+      font-weight: 700;
+    }
+
+    .account-form-field input,
+    .account-form-field select {
+      width: 100%;
+      min-height: 42px;
+      padding: 0 12px;
+      border: 1px solid var(--border, #d9dee7);
+      border-radius: 8px;
+      background: var(--card, #fff);
+      color: var(--text, #172033);
+      font-weight: 600;
+    }
+
+    .account-card h3 {
+      margin-bottom: 5px;
+    }
+
+    .account-currency-badge {
+      display: inline-flex;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(15, 118, 110, 0.10);
+      color: #0f766e;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .account-balance strong {
+      font-size: 22px;
+    }
+
     @media (max-width: 760px) {
       .store-selector {
         width: 100%;
@@ -664,6 +970,31 @@ function injectStoreStyles() {
   `;
 
   document.head.appendChild(style);
+}
+
+
+function ensureUsdtDashboardCard() {
+  if (document.getElementById("dashUsdt")) return;
+
+  const usdValue = document.getElementById("dashUsd");
+  const usdCard = usdValue?.closest(".metric, article, .card");
+  if (!usdCard || !usdCard.parentElement) return;
+
+  const card = usdCard.cloneNode(true);
+  card.querySelectorAll("[id]").forEach(element => element.removeAttribute("id"));
+
+  const label = card.querySelector("span");
+  const value = card.querySelector("h2, strong");
+  const small = card.querySelector("small");
+
+  if (label) label.textContent = "Saldo USDT";
+  if (value) {
+    value.id = "dashUsdt";
+    value.textContent = usdt(0);
+  }
+  if (small) small.textContent = "Saldo berjalan";
+
+  usdCard.insertAdjacentElement("afterend", card);
 }
 
 function ensureStoreSelector() {
@@ -743,25 +1074,165 @@ function updatePaymentField(form) {
   const amountWrapper = amountInput ? fieldWrapper(amountInput) : null;
   const amountLabel = amountWrapper?.querySelector("label");
   const helper = form.querySelector(".currency-helper");
-  const currency = currencySelect?.value === "IDR" ? "IDR" : "USD";
+  const rawCurrency = String(currencySelect?.value || "USD").toUpperCase();
+  const currency = ["USD", "USDT", "IDR"].includes(rawCurrency)
+    ? rawCurrency
+    : "USD";
 
   if (!amountInput) return;
 
-  if (amountLabel) {
-    amountLabel.textContent = `Nominal Pembayaran ${currency}`;
-  }
+  if (amountLabel) amountLabel.textContent = `Nominal Pembayaran ${currency}`;
 
   amountInput.step = currency === "IDR" ? "1" : "0.01";
   amountInput.inputMode = currency === "IDR" ? "numeric" : "decimal";
   amountInput.placeholder =
-    currency === "IDR" ? "Contoh: 500000" : "Contoh: 50.00";
+    currency === "IDR"
+      ? "Contoh: 500000"
+      : currency === "USDT"
+        ? "Contoh: 1000.00"
+        : "Contoh: 50.00";
 
   if (helper) {
     helper.textContent =
       currency === "IDR"
-        ? "Transaksi dicatat sebagai pembayaran IDR. Rate dipakai untuk menghitung nilai setara USD."
-        : "Transaksi dicatat sebagai pembayaran USD. Rate dipakai untuk menghitung nilai setara IDR.";
+        ? "Pembayaran dicatat sebagai IDR dan tidak masuk ke saldo USD/USDT."
+        : currency === "USDT"
+          ? "Pembayaran dicatat sebagai USDT dan dipisahkan dari saldo USD."
+          : "Pembayaran dicatat sebagai USD dan dipisahkan dari saldo USDT.";
   }
+}
+
+
+function fieldLabel(input, text) {
+  const wrapper = fieldWrapper(input);
+  const label = wrapper?.querySelector("label");
+  if (label) label.textContent = text;
+}
+
+function createAccountField(name, label, controlHtml, className = "") {
+  const wrapper = document.createElement("div");
+  wrapper.className = `account-form-field ${className}`.trim();
+  wrapper.innerHTML = `
+    <label>${label}</label>
+    ${controlHtml}
+  `;
+  return wrapper;
+}
+
+function injectAccountFields() {
+  const form = document.getElementById("walletForm");
+  if (!form || form.dataset.accountFieldsReady === "true") return;
+
+  form.dataset.accountFieldsReady = "true";
+
+  const ownerInput = form.querySelector('[name="name"]');
+  const typeInput = form.querySelector('[name="type"]');
+  const balanceInput = form.querySelector('[name="balance"]');
+  const colorInput = form.querySelector('[name="color"]');
+
+  if (!ownerInput || !balanceInput) return;
+
+  fieldLabel(ownerInput, "Nama Pemilik Rekening");
+  ownerInput.placeholder = "Contoh: Andi / Budi / PT ABC";
+  ownerInput.required = true;
+
+  if (typeInput) {
+    fieldLabel(typeInput, "Jenis Rekening");
+  }
+
+  fieldLabel(balanceInput, "Saldo Awal");
+  balanceInput.placeholder = "0";
+
+  if (colorInput) {
+    fieldLabel(colorInput, "Warna Penanda");
+  }
+
+  const balanceWrapper = fieldWrapper(balanceInput);
+
+  const institutionField = createAccountField(
+    "institution",
+    "Bank / Platform",
+    `
+      <input
+        type="text"
+        name="institution"
+        placeholder="Contoh: BCA, Mandiri, Binance"
+        required
+      >
+    `
+  );
+
+  const accountNumberField = createAccountField(
+    "accountNumber",
+    "Nomor Rekening / Akun",
+    `
+      <input
+        type="text"
+        name="accountNumber"
+        placeholder="Opsional"
+        autocomplete="off"
+      >
+    `
+  );
+
+  const currencyField = createAccountField(
+    "accountCurrency",
+    "Mata Uang Rekening",
+    `
+      <select name="accountCurrency" required>
+        <option value="IDR">IDR — Rupiah Indonesia</option>
+        <option value="USD">USD — Dolar Amerika</option>
+        <option value="USDT">USDT — Tether</option>
+      </select>
+      <small class="currency-helper">
+        Transaksi pada rekening ini otomatis memakai mata uang tersebut.
+      </small>
+    `
+  );
+
+  balanceWrapper?.insertAdjacentElement("beforebegin", institutionField);
+  institutionField.insertAdjacentElement("afterend", accountNumberField);
+  accountNumberField.insertAdjacentElement("afterend", currencyField);
+
+  const accountCurrency = form.querySelector('[name="accountCurrency"]');
+  if (accountCurrency) {
+    accountCurrency.addEventListener("change", () => {
+      const symbol =
+        accountCurrency.value === "IDR"
+          ? "Contoh: 150000000"
+          : "Contoh: 15000";
+      balanceInput.placeholder = symbol;
+    });
+  }
+}
+
+function syncPaymentCurrencyWithWallet(form) {
+  if (!form) return;
+
+  const walletSelect = form.querySelector('[name="wallet"]');
+  const currencySelect = form.querySelector('[name="currency"]');
+  const helper = currencySelect
+    ?.closest(".payment-currency-field")
+    ?.querySelector(".currency-helper");
+
+  if (!walletSelect || !currencySelect) return;
+
+  const wallet = getWalletById(walletSelect.value);
+
+  if (!wallet) {
+    currencySelect.disabled = false;
+    return;
+  }
+
+  currencySelect.value = wallet.currency;
+  currencySelect.disabled = true;
+
+  if (helper) {
+    helper.textContent =
+      `Mata uang mengikuti rekening ${accountDisplayName(wallet)} (${wallet.currency}).`;
+  }
+
+  updatePaymentField(form);
 }
 
 function injectCurrencyFields() {
@@ -773,6 +1244,10 @@ function injectCurrencyFields() {
     const rateInput = form.querySelector('[name="rate"]');
 
     if (!amountInput || !rateInput) return;
+
+    const rateWrapper = fieldWrapper(rateInput);
+    const rateLabel = rateWrapper?.querySelector("label");
+    if (rateLabel) rateLabel.textContent = "Rate USD/USDT ke IDR";
 
     form.querySelectorAll('[name="amountIdr"]').forEach(input => {
       const wrapper = fieldWrapper(input);
@@ -798,6 +1273,7 @@ function injectCurrencyFields() {
         <label>Mata Uang Pembayaran</label>
         <select name="currency" aria-label="Mata uang pembayaran">
           <option value="USD">USD — Dolar Amerika</option>
+          <option value="USDT">USDT — Tether</option>
           <option value="IDR">IDR — Rupiah Indonesia</option>
         </select>
         <small class="currency-helper"></small>
@@ -889,97 +1365,62 @@ function render() {
 
   const last = calculatedRows.at(-1) || {
     balance: 0,
+    usdtBalance: 0,
     idrBalance: 0,
     rate: settings.defaultRate
   };
 
-  const currentRate =
-    Number(last.rate || settings.defaultRate || 0);
+  const currentRate = Number(last.rate || settings.defaultRate || 0);
 
-  const totalInUsd = filteredTransactions
-    .filter(
-      transaction =>
-        transaction.type === "in" &&
-        transactionCurrency(transaction) === "USD"
-    )
-    .reduce(
-      (total, transaction) =>
-        total + transactionPaymentAmount(transaction),
-      0
-    );
+  const sum = (type, currency) =>
+    filteredTransactions
+      .filter(
+        transaction =>
+          transaction.type === type &&
+          transactionCurrency(transaction) === currency
+      )
+      .reduce(
+        (total, transaction) =>
+          total + transactionPaymentAmount(transaction),
+        0
+      );
 
-  const totalOutUsd = filteredTransactions
-    .filter(
-      transaction =>
-        transaction.type === "out" &&
-        transactionCurrency(transaction) === "USD"
-    )
-    .reduce(
-      (total, transaction) =>
-        total + transactionPaymentAmount(transaction),
-      0
-    );
-
-  const totalInIdr = filteredTransactions
-    .filter(
-      transaction =>
-        transaction.type === "in" &&
-        transactionCurrency(transaction) === "IDR"
-    )
-    .reduce(
-      (total, transaction) =>
-        total + transactionPaymentAmount(transaction),
-      0
-    );
-
-  const totalOutIdr = filteredTransactions
-    .filter(
-      transaction =>
-        transaction.type === "out" &&
-        transactionCurrency(transaction) === "IDR"
-    )
-    .reduce(
-      (total, transaction) =>
-        total + transactionPaymentAmount(transaction),
-      0
-    );
+  const totalInUsd = sum("in", "USD");
+  const totalOutUsd = sum("out", "USD");
+  const totalInUsdt = sum("in", "USDT");
+  const totalOutUsdt = sum("out", "USDT");
+  const totalInIdr = sum("in", "IDR");
+  const totalOutIdr = sum("out", "IDR");
 
   const combinedTotalInIdr =
-    totalInIdr + totalInUsd * currentRate;
-
+    totalInIdr + (totalInUsd + totalInUsdt) * currentRate;
   const combinedTotalOutIdr =
-    totalOutIdr + totalOutUsd * currentRate;
+    totalOutIdr + (totalOutUsd + totalOutUsdt) * currentRate;
 
-  const largestUsd = Math.max(
-    0,
-    ...filteredTransactions
-      .filter(transaction => transactionCurrency(transaction) === "USD")
-      .map(transaction => transactionPaymentAmount(transaction))
-  );
-
-  const largestIdr = Math.max(
-    0,
-    ...filteredTransactions
-      .filter(transaction => transactionCurrency(transaction) === "IDR")
-      .map(transaction => transactionPaymentAmount(transaction))
-  );
+  const largest = currency =>
+    Math.max(
+      0,
+      ...filteredTransactions
+        .filter(transaction => transactionCurrency(transaction) === currency)
+        .map(transaction => transactionPaymentAmount(transaction))
+    );
 
   const setText = (id, value) => {
     const element = document.getElementById(id);
     if (element) element.textContent = value;
   };
 
-  // Saldo tetap dipisahkan berdasarkan mata uang asli.
-  setText("dashUsd", usd(last.balance));
-  setText("dashIdr", idr(last.idrBalance));
+  ensureUsdtDashboardCard();
 
-  // Total Masuk dan Total Keluar digabung dalam IDR:
-  // transaksi USD dikurs memakai rate transaksi terakhir,
-  // kemudian ditambah transaksi IDR.
+  setText("dashUsd", usd(totalAccountBalance("USD")));
+  setText("dashUsdt", usdt(totalAccountBalance("USDT")));
+  setText("dashIdr", idr(totalAccountBalance("IDR")));
+
   setCombinedIdrDashboardValue(
     "dashIn",
     combinedTotalInIdr,
     totalInUsd,
+    totalInUsdt,
     totalInIdr,
     currentRate
   );
@@ -988,18 +1429,18 @@ function render() {
     "dashOut",
     combinedTotalOutIdr,
     totalOutUsd,
+    totalOutUsdt,
     totalOutIdr,
     currentRate
   );
 
   setText("summaryCount", filteredTransactions.length);
-
   setDualDashboardValue(
     "summaryLargest",
-    largestUsd,
-    largestIdr
+    largest("USD"),
+    largest("USDT"),
+    largest("IDR")
   );
-
   setText("summaryRate", idr(currentRate));
   setText("summaryWallets", filteredWallets.length);
 
@@ -1038,7 +1479,7 @@ function renderRecent(calculatedRows) {
           ${esc(transaction.note)}
           ${storeLabel(transaction)}
         </td>
-        <td>${esc(transaction.wallet)}</td>
+        <td>${esc(transactionAccountLabel(transaction))}</td>
         <td>
           <span class="badge ${transaction.type}">
             ${transaction.type === "in" ? "MASUK" : "KELUAR"}
@@ -1050,6 +1491,7 @@ function renderRecent(calculatedRows) {
         <td>
           ${dualMoneyHtml(
             transaction.balance,
+            transaction.usdtBalance,
             transaction.idrBalance
           )}
         </td>
@@ -1075,17 +1517,20 @@ function renderLedger(calculatedRows = rows()) {
   body.innerHTML = "";
 
   calculatedRows
-    .filter(
-      transaction =>
+    .filter(transaction => {
+      const account = getTransactionWallet(transaction);
+      const accountText = transactionAccountLabel(transaction).toLowerCase();
+
+      return (
         (!search ||
           transaction.note.toLowerCase().includes(search) ||
-          getStoreName(transaction.storeId)
-            .toLowerCase()
-            .includes(search)) &&
-        (!walletFilter || transaction.wallet === walletFilter) &&
+          accountText.includes(search) ||
+          getStoreName(transaction.storeId).toLowerCase().includes(search)) &&
+        (!walletFilter || String(account?.id || "") === String(walletFilter)) &&
         (!typeFilter || transaction.type === typeFilter) &&
         (!dateFilter || transaction.date === dateFilter)
-    )
+      );
+    })
     .forEach(transaction => {
       const row = document.createElement("tr");
 
@@ -1095,7 +1540,7 @@ function renderLedger(calculatedRows = rows()) {
           ${esc(transaction.note)}
           ${storeLabel(transaction)}
         </td>
-        <td>${esc(transaction.wallet)}</td>
+        <td>${esc(transactionAccountLabel(transaction))}</td>
         <td>${idr(transaction.rate)}</td>
         <td class="green">
           ${
@@ -1114,6 +1559,7 @@ function renderLedger(calculatedRows = rows()) {
         <td>
           ${dualMoneyHtml(
             transaction.balance,
+            transaction.usdtBalance,
             transaction.idrBalance
           )}
         </td>
@@ -1142,30 +1588,33 @@ function renderWallets() {
 
   getFilteredWallets().forEach(wallet => {
     const card = document.createElement("article");
-    card.className = "metric wallet-card";
+    card.className = "metric wallet-card account-card";
+
+    const numberLine = maskedAccountNumber(wallet.accountNumber);
+    const storeLine =
+      activeStoreId === "all"
+        ? ` • ${esc(getStoreName(wallet.storeId))}`
+        : "";
 
     card.innerHTML = `
       <div class="wallet-top">
         <div>
           <span>
-            ${esc(wallet.type)}
-            ${
-              activeStoreId === "all"
-                ? ` • ${esc(getStoreName(wallet.storeId))}`
-                : ""
-            }
+            ${esc(wallet.institution)}
+            ${numberLine ? ` • ${esc(numberLine)}` : ""}
+            ${storeLine}
           </span>
-          <h3>${esc(wallet.name)}</h3>
+          <h3>${esc(wallet.ownerName)}</h3>
+          <small class="account-currency-badge">${esc(wallet.currency)}</small>
         </div>
         <span class="wallet-dot ${wallet.color}"></span>
       </div>
-      <div class="wallet-money">
-        ${dualMoneyHtml(
-          walletBalance(wallet),
-          walletBalanceIdr(wallet)
-        )}
+
+      <div class="wallet-money account-balance">
+        <strong>${accountBalanceText(wallet)}</strong>
       </div>
-      <small>Saldo wallet</small>
+
+      <small>Saldo terakhir rekening</small>
     `;
 
     container.appendChild(card);
@@ -1182,29 +1631,31 @@ function renderQuickLists() {
   cashInList.innerHTML = "";
   cashOutList.innerHTML = "";
 
+  const itemHtml = transaction => `
+    <div class="transaction-item">
+      <div>
+        <strong>${esc(transaction.note)}</strong>
+        <small>
+          ${dateLabel(transaction.date)} • ${esc(transactionAccountLabel(transaction))}
+          ${
+            activeStoreId === "all"
+              ? ` • ${esc(getStoreName(transaction.storeId))}`
+              : ""
+          }
+        </small>
+      </div>
+      <div class="${transaction.type === "in" ? "green" : "red"}">
+        ${paymentMoneyHtml(transaction)}
+      </div>
+    </div>
+  `;
+
   filteredTransactions
     .filter(transaction => transaction.type === "in")
     .slice(-6)
     .reverse()
     .forEach(transaction => {
-      cashInList.innerHTML += `
-        <div class="transaction-item">
-          <div>
-            <strong>${esc(transaction.note)}</strong>
-            <small>
-              ${dateLabel(transaction.date)} • ${esc(transaction.wallet)}
-              ${
-                activeStoreId === "all"
-                  ? ` • ${esc(getStoreName(transaction.storeId))}`
-                  : ""
-              }
-            </small>
-          </div>
-          <div class="green">
-            ${paymentMoneyHtml(transaction)}
-          </div>
-        </div>
-      `;
+      cashInList.innerHTML += itemHtml(transaction);
     });
 
   filteredTransactions
@@ -1212,24 +1663,7 @@ function renderQuickLists() {
     .slice(-6)
     .reverse()
     .forEach(transaction => {
-      cashOutList.innerHTML += `
-        <div class="transaction-item">
-          <div>
-            <strong>${esc(transaction.note)}</strong>
-            <small>
-              ${dateLabel(transaction.date)} • ${esc(transaction.wallet)}
-              ${
-                activeStoreId === "all"
-                  ? ` • ${esc(getStoreName(transaction.storeId))}`
-                  : ""
-              }
-            </small>
-          </div>
-          <div class="red">
-            ${paymentMoneyHtml(transaction)}
-          </div>
-        </div>
-      `;
+      cashOutList.innerHTML += itemHtml(transaction);
     });
 }
 
@@ -1242,6 +1676,7 @@ function renderReports() {
 
     summary.forEach(item => {
       const netUsd = item.in - item.out;
+      const netUsdt = item.inUsdt - item.outUsdt;
       const netIdr = item.inIdr - item.outIdr;
 
       const label = new Date(
@@ -1255,13 +1690,13 @@ function renderReports() {
         <tr>
           <td>${label}</td>
           <td class="green">
-            ${dualMoneyHtml(item.in, item.inIdr)}
+            ${dualMoneyHtml(item.in, item.inUsdt, item.inIdr)}
           </td>
           <td class="red">
-            ${dualMoneyHtml(item.out, item.outIdr)}
+            ${dualMoneyHtml(item.out, item.outUsdt, item.outIdr)}
           </td>
-          <td class="${netUsd >= 0 ? "green" : "red"}">
-            ${dualMoneyHtml(netUsd, netIdr)}
+          <td class="${netUsd >= 0 && netUsdt >= 0 && netIdr >= 0 ? "green" : "red"}">
+            ${dualMoneyHtml(netUsd, netUsdt, netIdr)}
           </td>
           <td>${item.count}</td>
         </tr>
@@ -1273,6 +1708,8 @@ function renderReports() {
   const current = summary.find(item => item.month === currentMonth) || {
     in: 0,
     out: 0,
+    inUsdt: 0,
+    outUsdt: 0,
     inIdr: 0,
     outIdr: 0
   };
@@ -1280,44 +1717,75 @@ function renderReports() {
   setDualDashboardValue(
     "reportIn",
     current.in,
+    current.inUsdt,
     current.inIdr
   );
-
   setDualDashboardValue(
     "reportOut",
     current.out,
+    current.outUsdt,
     current.outIdr
   );
-
   setDualDashboardValue(
     "reportNet",
     current.in - current.out,
+    current.inUsdt - current.outUsdt,
     current.inIdr - current.outIdr
   );
 }
 
 function populateWallets() {
-  const walletOptions = getFilteredWallets()
-    .map(
-      wallet =>
-        `<option value="${esc(wallet.name)}">${esc(wallet.name)}${
-          activeStoreId === "all"
-            ? ` — ${esc(getStoreName(wallet.storeId))}`
-            : ""
-        }</option>`
-    )
+  const availableWallets = getFilteredWallets();
+
+  const walletOptions = availableWallets
+    .map(wallet => {
+      const number = maskedAccountNumber(wallet.accountNumber);
+      const store =
+        activeStoreId === "all"
+          ? ` — ${getStoreName(wallet.storeId)}`
+          : "";
+
+      return `
+        <option value="${esc(wallet.id)}">
+          ${esc(accountDisplayName(wallet))}${
+            number ? ` — ${esc(number)}` : ""
+          } — ${esc(wallet.currency)}${esc(store)}
+        </option>
+      `;
+    })
     .join("");
 
   document.querySelectorAll('select[name="wallet"]').forEach(select => {
     const oldValue = select.value;
+    const oldWallet =
+      getWalletById(oldValue) ||
+      availableWallets.find(wallet =>
+        wallet.name === oldValue ||
+        wallet.legacyName === oldValue ||
+        wallet.institution === oldValue
+      );
+
     select.innerHTML = walletOptions;
 
+    const preferredId = oldWallet?.id || availableWallets[0]?.id || "";
+
     if (
-      oldValue &&
-      [...select.options].some(option => option.value === oldValue)
+      preferredId &&
+      [...select.options].some(
+        option => String(option.value) === String(preferredId)
+      )
     ) {
-      select.value = oldValue;
+      select.value = preferredId;
     }
+
+    if (select.dataset.accountCurrencyBound !== "true") {
+      select.dataset.accountCurrencyBound = "true";
+      select.addEventListener("change", () => {
+        syncPaymentCurrencyWithWallet(select.form);
+      });
+    }
+
+    syncPaymentCurrencyWithWallet(select.form);
   });
 
   const filter = document.getElementById("filterWallet");
@@ -1325,11 +1793,13 @@ function populateWallets() {
   if (filter) {
     const oldValue = filter.value;
     filter.innerHTML =
-      '<option value="">Semua wallet</option>' + walletOptions;
+      '<option value="">Semua rekening</option>' + walletOptions;
 
     if (
       oldValue &&
-      [...filter.options].some(option => option.value === oldValue)
+      [...filter.options].some(
+        option => String(option.value) === String(oldValue)
+      )
     ) {
       filter.value = oldValue;
     }
@@ -1347,37 +1817,30 @@ function drawChart() {
 
   canvas.width = width * ratio;
   canvas.height = height * ratio;
-
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
 
   const summary = monthly().slice(-8);
   const hasUsd = summary.some(item => item.in > 0 || item.out > 0);
-  const chartCurrency = hasUsd ? "USD" : "IDR";
+  const hasUsdt = summary.some(item => item.inUsdt > 0 || item.outUsdt > 0);
+  const chartCurrency = hasUsd ? "USD" : hasUsdt ? "USDT" : "IDR";
 
-  const values = summary.flatMap(item =>
-    chartCurrency === "USD"
-      ? [item.in, item.out]
-      : [item.inIdr, item.outIdr]
-  );
+  const getValues = item => {
+    if (chartCurrency === "USD") return [item.in, item.out];
+    if (chartCurrency === "USDT") return [item.inUsdt, item.outUsdt];
+    return [item.inIdr, item.outIdr];
+  };
 
-  const maximum = Math.max(1, ...values);
+  const maximum = Math.max(1, ...summary.flatMap(getValues));
   const padding = 34;
   const chartHeight = height - 60;
   const chartWidth = width - padding * 2;
   const styles = getComputedStyle(document.body);
 
-  context.strokeStyle =
-    styles.getPropertyValue("--border").trim() || "#ddd";
-  context.fillStyle =
-    styles.getPropertyValue("--muted").trim() || "#777";
+  context.strokeStyle = styles.getPropertyValue("--border").trim() || "#ddd";
+  context.fillStyle = styles.getPropertyValue("--muted").trim() || "#777";
   context.font = "12px Arial";
-
-  context.fillText(
-    `Grafik ${chartCurrency} — saldo USD dan IDR dihitung terpisah`,
-    padding,
-    12
-  );
+  context.fillText(`Grafik ${chartCurrency}`, padding, 12);
 
   for (let index = 0; index <= 4; index += 1) {
     const y = 24 + (chartHeight / 4) * index;
@@ -1393,26 +1856,15 @@ function drawChart() {
   }
 
   const groupWidth = chartWidth / summary.length;
-
   summary.forEach((item, index) => {
-    const incoming =
-      chartCurrency === "USD" ? item.in : item.inIdr;
-    const outgoing =
-      chartCurrency === "USD" ? item.out : item.outIdr;
-
+    const [incoming, outgoing] = getValues(item);
     const barX = padding + index * groupWidth + groupWidth * 0.18;
     const barWidth = groupWidth * 0.24;
     const inHeight = (incoming / maximum) * chartHeight;
     const outHeight = (outgoing / maximum) * chartHeight;
 
     context.fillStyle = "#16803d";
-    context.fillRect(
-      barX,
-      24 + chartHeight - inHeight,
-      barWidth,
-      inHeight
-    );
-
+    context.fillRect(barX, 24 + chartHeight - inHeight, barWidth, inHeight);
     context.fillStyle = "#c62828";
     context.fillRect(
       barX + barWidth + 5,
@@ -1421,13 +1873,9 @@ function drawChart() {
       outHeight
     );
 
-    context.fillStyle =
-      styles.getPropertyValue("--muted").trim() || "#777";
-
+    context.fillStyle = styles.getPropertyValue("--muted").trim() || "#777";
     context.fillText(
-      new Date(`${item.month}-01`).toLocaleDateString("id-ID", {
-        month: "short"
-      }),
+      new Date(`${item.month}-01`).toLocaleDateString("id-ID", { month: "short" }),
       barX,
       height - 16
     );
@@ -1456,14 +1904,18 @@ function openModal(item = null) {
 
   form.date.value =
     item?.date || new Date().toISOString().slice(0, 10);
+
+  const itemWallet = item ? getTransactionWallet(item) : null;
   form.wallet.value =
-    item?.wallet || getFilteredWallets()[0]?.name || "";
+    itemWallet?.id || getFilteredWallets()[0]?.id || "";
+
   form.type.value = item?.type || "in";
   form.rate.value = item?.rate || settings.defaultRate;
   form.note.value = item?.note || "";
   form.reference.value = item?.reference || "";
 
   fillCurrencyFields(form, item);
+  syncPaymentCurrencyWithWallet(form);
 
   document.getElementById("transactionModal")?.classList.add("show");
 }
@@ -1477,7 +1929,6 @@ function saveTx(data, typeOverride = null) {
   const currentItem = editingId
     ? transactions.find(transaction => transaction.id === editingId)
     : null;
-
   const storeId = currentItem?.storeId || activeStoreId;
 
   if (storeId === "all") {
@@ -1485,20 +1936,23 @@ function saveTx(data, typeOverride = null) {
     return false;
   }
 
-  const rate =
-    Number(data.get("rate")) ||
-    Number(settings.defaultRate) ||
-    0;
+  const wallet = getWalletById(data.get("wallet"));
 
-  const currency = data.get("currency") === "IDR" ? "IDR" : "USD";
+  if (!wallet || wallet.storeId !== storeId) {
+    alert("Pilih rekening yang valid untuk toko ini.");
+    return false;
+  }
+
+  const rate = Number(data.get("rate")) || Number(settings.defaultRate) || 0;
+  const currency = wallet.currency;
   const paymentAmount = numericValue(data.get("amount"));
 
   const amountUsd =
-    currency === "USD"
-      ? paymentAmount
-      : rate > 0
+    currency === "IDR"
+      ? rate > 0
         ? Number((paymentAmount / rate).toFixed(6))
-        : 0;
+        : 0
+      : paymentAmount;
 
   const amountIdr =
     currency === "IDR"
@@ -1507,7 +1961,8 @@ function saveTx(data, typeOverride = null) {
 
   const transaction = {
     date: data.get("date"),
-    wallet: data.get("wallet"),
+    walletId: wallet.id,
+    wallet: accountDisplayName(wallet),
     type: typeOverride || data.get("type"),
     currency,
     paymentAmount,
@@ -1521,39 +1976,34 @@ function saveTx(data, typeOverride = null) {
 
   if (
     !transaction.date ||
-    !transaction.wallet ||
+    !transaction.walletId ||
     !transaction.note ||
     !transaction.rate ||
     transaction.paymentAmount <= 0
   ) {
-    alert("Lengkapi data wajib, pilih mata uang, dan isi nominal pembayaran.");
+    alert("Lengkapi data wajib dan isi nominal pembayaran.");
     return false;
   }
 
   if (editingId) {
     transactions = transactions.map(item =>
-      item.id === editingId
-        ? { ...item, ...transaction }
-        : item
+      item.id === editingId ? { ...item, ...transaction } : item
     );
   } else {
     transaction.id = transactions.length
       ? Math.max(...transactions.map(item => Number(item.id) || 0)) + 1
       : 1;
-
     transactions.push(transaction);
   }
 
   const wasEditing = Boolean(editingId);
-
   save();
   render();
   toast(
     wasEditing
       ? "Transaksi diperbarui."
-      : `Pembayaran ${currency} ditambahkan ke ${getStoreName(storeId)}.`
+      : `${currency} ditambahkan ke ${accountDisplayName(wallet)}.`
   );
-
   return true;
 }
 
@@ -1608,26 +2058,36 @@ function exportAll() {
         "Toko",
         "Tanggal",
         "Keterangan",
-        "Wallet",
+        "Pemilik Rekening",
+        "Bank / Platform",
+        "Nomor Rekening",
+        "Mata Uang Rekening",
         "Tipe",
-        "Mata Uang Pembayaran",
         "Nominal Pembayaran",
-        "Rate USD/IDR",
+        "Rate USD/USDT ke IDR",
         "Nilai Setara USD",
+        "Nilai USDT Asli",
         "Nilai Setara IDR"
       ],
-      ...filteredTransactions.map(transaction => [
-        getStoreName(transaction.storeId),
-        transaction.date,
-        transaction.note,
-        transaction.wallet,
-        transaction.type,
-        transactionCurrency(transaction),
-        transactionPaymentAmount(transaction),
-        transaction.rate,
-        transactionUsd(transaction),
-        transactionIdr(transaction)
-      ])
+      ...filteredTransactions.map(transaction => {
+        const wallet = getTransactionWallet(transaction);
+
+        return [
+          getStoreName(transaction.storeId),
+          transaction.date,
+          transaction.note,
+          wallet?.ownerName || "",
+          wallet?.institution || transaction.wallet,
+          wallet?.accountNumber || "",
+          transactionCurrency(transaction),
+          transaction.type,
+          transactionPaymentAmount(transaction),
+          transaction.rate,
+          transactionUsd(transaction),
+          transactionUsdt(transaction),
+          transactionIdr(transaction)
+        ];
+      })
     ]
   );
 }
@@ -1637,20 +2097,26 @@ function exportReport() {
     [
       "Bulan",
       "Masuk USD",
+      "Masuk USDT",
       "Masuk IDR",
       "Keluar USD",
+      "Keluar USDT",
       "Keluar IDR",
       "Net USD",
+      "Net USDT",
       "Net IDR",
       "Jumlah"
     ],
     ...monthly().map(item => [
       item.month,
       item.in,
+      item.inUsdt,
       item.inIdr,
       item.out,
+      item.outUsdt,
       item.outIdr,
       item.in - item.out,
+      item.inUsdt - item.outUsdt,
       item.inIdr - item.outIdr,
       item.count
     ])
@@ -1729,11 +2195,9 @@ function bindEvents() {
 
       if (saveTx(new FormData(event.target), "in")) {
         event.target.reset();
-        event.target.date.value = new Date()
-          .toISOString()
-          .slice(0, 10);
+        event.target.date.value = new Date().toISOString().slice(0, 10);
         event.target.rate.value = settings.defaultRate;
-        fillCurrencyFields(event.target);
+        populateWallets();
       }
     });
 
@@ -1746,11 +2210,9 @@ function bindEvents() {
 
       if (saveTx(new FormData(event.target), "out")) {
         event.target.reset();
-        event.target.date.value = new Date()
-          .toISOString()
-          .slice(0, 10);
+        event.target.date.value = new Date().toISOString().slice(0, 10);
         event.target.rate.value = settings.defaultRate;
-        fillCurrencyFields(event.target);
+        populateWallets();
       }
     });
 
@@ -1762,32 +2224,56 @@ function bindEvents() {
       if (!requireSelectedStore()) return;
 
       const data = new FormData(event.target);
-      const name = String(data.get("name") || "").trim();
+      const ownerName = String(data.get("name") || "").trim();
+      const institution = String(data.get("institution") || "").trim();
+      const accountNumber = String(data.get("accountNumber") || "").trim();
+      const currency = String(data.get("accountCurrency") || "IDR").toUpperCase();
 
-      if (
-        wallets.some(
-          wallet =>
-            wallet.storeId === activeStoreId &&
-            wallet.name.toLowerCase() === name.toLowerCase()
-        )
-      ) {
-        alert("Nama wallet sudah ada di toko ini.");
+      if (!ownerName || !institution) {
+        alert("Isi nama pemilik dan bank/platform.");
         return;
       }
 
+      const duplicate = wallets.some(wallet =>
+        wallet.storeId === activeStoreId &&
+        wallet.ownerName.toLowerCase() === ownerName.toLowerCase() &&
+        wallet.institution.toLowerCase() === institution.toLowerCase() &&
+        String(wallet.accountNumber || "").toLowerCase() ===
+          accountNumber.toLowerCase() &&
+        wallet.currency === currency
+      );
+
+      if (duplicate) {
+        alert("Rekening tersebut sudah ada di toko ini.");
+        return;
+      }
+
+      const name =
+        ownerName.toLowerCase() === institution.toLowerCase()
+          ? ownerName
+          : `${ownerName} — ${institution}`;
+
       wallets.push({
-        id: `${activeStoreId}-${Date.now()}`,
+        id: `${activeStoreId}-account-${Date.now()}`,
         name,
-        type: data.get("type"),
-        balance: Number(data.get("balance")) || 0,
-        color: data.get("color"),
+        ownerName,
+        institution,
+        accountNumber,
+        currency,
+        type: data.get("type") || (currency === "USDT" ? "Crypto" : "Bank"),
+        balance: numericValue(data.get("balance")),
+        color: data.get("color") || (currency === "IDR" ? "green" : "blue"),
         storeId: activeStoreId
       });
 
       save();
       render();
       event.target.reset();
-      toast(`Wallet ditambahkan ke ${getStoreName(activeStoreId)}.`);
+
+      const currencyField = event.target.querySelector('[name="accountCurrency"]');
+      if (currencyField) currencyField.value = "IDR";
+
+      toast(`${name} (${currency}) ditambahkan ke ${getStoreName(activeStoreId)}.`);
     });
 
   [
@@ -1825,10 +2311,8 @@ function bindEvents() {
 
       const data = new FormData(event.target);
 
-      settings.appName =
-        data.get("appName") || "Ledger Pro";
-      settings.defaultRate =
-        Number(data.get("defaultRate")) || 16300;
+      settings.appName = data.get("appName") || "Ledger Pro";
+      settings.defaultRate = Number(data.get("defaultRate")) || 16300;
       settings.dateFormat = data.get("dateFormat");
       settings.currency = data.get("currency");
 
@@ -1860,8 +2344,10 @@ function bindEvents() {
 function initialize() {
   injectStoreStyles();
   ensureStoreSelector();
+  ensureUsdtDashboardCard();
   populateStores();
   injectCurrencyFields();
+  injectAccountFields();
   bindEvents();
 
   document
