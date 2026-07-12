@@ -391,6 +391,37 @@ function setDualDashboardValue(id, usdValue, idrValue) {
   secondary.textContent = idr(idrValue);
 }
 
+function setCombinedIdrDashboardValue(
+  id,
+  combinedIdr,
+  usdAmount,
+  nativeIdrAmount,
+  rate
+) {
+  const element = document.getElementById(id);
+  if (!element) return;
+
+  element.textContent = idr(combinedIdr);
+
+  const parent = element.parentElement;
+  if (!parent) return;
+
+  let secondary = parent.querySelector(
+    `[data-secondary-money="${id}"]`
+  );
+
+  if (!secondary) {
+    secondary = document.createElement("small");
+    secondary.dataset.secondaryMoney = id;
+    secondary.className = "dashboard-idr-value";
+    element.insertAdjacentElement("afterend", secondary);
+  }
+
+  secondary.textContent =
+    `${usd(usdAmount)} × ${idr(rate)} + ${idr(nativeIdrAmount)}`;
+}
+
+
 function dateLabel(value) {
   return new Date(`${value}T00:00:00`).toLocaleDateString(
     settings.dateFormat || "id-ID",
@@ -862,6 +893,9 @@ function render() {
     rate: settings.defaultRate
   };
 
+  const currentRate =
+    Number(last.rate || settings.defaultRate || 0);
+
   const totalInUsd = filteredTransactions
     .filter(
       transaction =>
@@ -910,6 +944,12 @@ function render() {
       0
     );
 
+  const combinedTotalInIdr =
+    totalInIdr + totalInUsd * currentRate;
+
+  const combinedTotalOutIdr =
+    totalOutIdr + totalOutUsd * currentRate;
+
   const largestUsd = Math.max(
     0,
     ...filteredTransactions
@@ -929,19 +969,27 @@ function render() {
     if (element) element.textContent = value;
   };
 
+  // Saldo tetap dipisahkan berdasarkan mata uang asli.
   setText("dashUsd", usd(last.balance));
   setText("dashIdr", idr(last.idrBalance));
 
-  setDualDashboardValue(
+  // Total Masuk dan Total Keluar digabung dalam IDR:
+  // transaksi USD dikurs memakai rate transaksi terakhir,
+  // kemudian ditambah transaksi IDR.
+  setCombinedIdrDashboardValue(
     "dashIn",
+    combinedTotalInIdr,
     totalInUsd,
-    totalInIdr
+    totalInIdr,
+    currentRate
   );
 
-  setDualDashboardValue(
+  setCombinedIdrDashboardValue(
     "dashOut",
+    combinedTotalOutIdr,
     totalOutUsd,
-    totalOutIdr
+    totalOutIdr,
+    currentRate
   );
 
   setText("summaryCount", filteredTransactions.length);
@@ -952,7 +1000,7 @@ function render() {
     largestIdr
   );
 
-  setText("summaryRate", idr(last.rate));
+  setText("summaryRate", idr(currentRate));
   setText("summaryWallets", filteredWallets.length);
 
   renderRecent(calculatedRows);
