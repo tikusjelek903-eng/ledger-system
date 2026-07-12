@@ -60,8 +60,8 @@ if(page==="dashboard")drawChart();
 
 function render(){
 const r=rows(), last=r.at(-1)||{balance:0,idrBalance:0,rate:settings.defaultRate};
-const tin=transactions.filter(t=>t.type==="in").reduce((a,t)=>a++t.amount,0);
-const tout=transactions.filter(t=>t.type==="out").reduce((a,t)=>a++t.amount,0);
+const tin=transactions.filter(t=>t.type==="in").reduce((a,t)=>a+Number(t.amount),0);
+const tout=transactions.filter(t=>t.type==="out").reduce((a,t)=>a+Number(t.amount),0);
 document.getElementById("dashUsd").textContent=usd(last.balance);
 document.getElementById("dashIdr").textContent=idr(last.idrBalance);
 document.getElementById("dashIn").textContent=usd(tin);
