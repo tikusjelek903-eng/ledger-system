@@ -1,148 +1,1326 @@
-const seedWallets=[
-{id:1,name:"Ledger",type:"Crypto",balance:0,color:"blue"},
-{id:2,name:"BCA",type:"Bank",balance:0,color:"green"},
-{id:3,name:"Kas",type:"Kas",balance:0,color:"orange"}
-];
-const seedTransactions=[
-{id:1,date:"2024-04-24",note:"Saldo awal",wallet:"Ledger",type:"in",amount:30000,rate:16300,reference:""},
-{id:2,date:"2024-04-24",note:"Transfer masuk",wallet:"Ledger",type:"in",amount:31336.39,rate:16300,reference:""},
-{id:3,date:"2024-04-24",note:"Transfer masuk",wallet:"BCA",type:"in",amount:7001,rate:16300,reference:""},
-{id:4,date:"2024-04-25",note:"Transfer masuk",wallet:"Ledger",type:"in",amount:9231.47,rate:16300,reference:""},
-{id:5,date:"2024-04-27",note:"Pengeluaran operasional",wallet:"Kas",type:"out",amount:30000,rate:16300,reference:""},
-{id:6,date:"2024-04-27",note:"Pengeluaran",wallet:"Kas",type:"out",amount:2000,rate:16300,reference:""},
-{id:7,date:"2024-05-01",note:"Transfer masuk",wallet:"BCA",type:"in",amount:2000,rate:16333,reference:""},
-{id:8,date:"2024-05-02",note:"Pengeluaran",wallet:"Kas",type:"out",amount:5000,rate:16333,reference:""}
-];
-const defaultSettings={appName:"Ledger Pro",defaultRate:16300,dateFormat:"id-ID",currency:"USD",theme:"light"};
-let wallets=JSON.parse(localStorage.getItem("lpv2_wallets"))||seedWallets;
-let transactions=JSON.parse(localStorage.getItem("lpv2_transactions"))||seedTransactions;
-let settings=JSON.parse(localStorage.getItem("lpv2_settings"))||defaultSettings;
-let editingId=null;
-
-const meta={
-dashboard:["Dashboard","Ringkasan kondisi keuangan."],
-ledger:["Ledger","Kelola seluruh transaksi."],
-cashin:["Cash In","Tambah dan pantau uang masuk."],
-cashout:["Cash Out","Tambah dan pantau uang keluar."],
-wallets:["Wallet","Kelola bank, crypto wallet, dan kas."],
-reports:["Laporan","Rekap keuangan bulanan."],
-settings:["Pengaturan","Atur preferensi aplikasi."]
+const currentUser = {
+  name: "Super Admin",
+  role: "superadmin"
 };
 
-function usd(v){return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(v||0))}
-function idr(v){return new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0}).format(Number(v||0))}
-function dateLabel(v){return new Date(v+"T00:00:00").toLocaleDateString(settings.dateFormat||"id-ID",{day:"2-digit",month:"short",year:"numeric"})}
-function save(){localStorage.setItem("lpv2_wallets",JSON.stringify(wallets));localStorage.setItem("lpv2_transactions",JSON.stringify(transactions));localStorage.setItem("lpv2_settings",JSON.stringify(settings))}
-function esc(s){return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;")}
-function toast(msg){const e=document.getElementById("toast");e.textContent=msg;e.classList.add("show");clearTimeout(window.tt);window.tt=setTimeout(()=>e.classList.remove("show"),2200)}
+const seedStores = [
+  { id: "toko-g", name: "TOKO G" },
+  { id: "toko-s", name: "TOKO S" },
+  { id: "toko-d", name: "TOKO D" },
+  { id: "toko-p", name: "TOKO P" },
+  { id: "toko-k", name: "TOKO K" }
+];
 
-function rows(){
-let balance=0;
-return [...transactions].sort((a,b)=>new Date(a.date)-new Date(b.date)||a.id-b.id).map(t=>{balance+=t.type==="in"?+t.amount:-t.amount;return {...t,balance,idrBalance:balance*t.rate}})
-}
-function walletBalance(name){return transactions.filter(t=>t.wallet===name).reduce((a,t)=>a+(t.type==="in"?+t.amount:-t.amount),0)+(wallets.find(w=>w.name===name)?.balance||0)}
-function monthly(){
-const m={};transactions.forEach(t=>{const k=t.date.slice(0,7);m[k]??={month:k,in:0,out:0,count:0};m[k].count++;m[k][t.type]+=+t.amount});return Object.values(m).sort((a,b)=>a.month.localeCompare(b.month))
-}
-
-function showPage(page){
-document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));
-document.querySelectorAll(".nav-item").forEach(x=>x.classList.remove("active"));
-document.getElementById(page+"Page").classList.add("active");
-document.querySelector(`[data-page="${page}"]`).classList.add("active");
-document.getElementById("pageTitle").textContent=meta[page][0];
-document.getElementById("pageSubtitle").textContent=meta[page][1];
-const hide=page==="settings"||page==="wallets";
-document.getElementById("openTransactionModal").style.display=hide?"none":"";
-document.getElementById("exportAll").style.display=page==="settings"?"none":"";
-if(page==="dashboard")drawChart();
+function safeParse(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : fallback;
+  } catch (error) {
+    console.warn(`Data ${key} rusak, memakai data awal.`, error);
+    return fallback;
+  }
 }
 
-function render(){
-const r=rows(), last=r.at(-1)||{balance:0,idrBalance:0,rate:settings.defaultRate};
-const tin=transactions.filter(t=>t.type==="in").reduce((a,t)=>a+Number(t.amount),0);
-const tout=transactions.filter(t=>t.type==="out").reduce((a,t)=>a+Number(t.amount),0);
-document.getElementById("dashUsd").textContent=usd(last.balance);
-document.getElementById("dashIdr").textContent=idr(last.idrBalance);
-document.getElementById("dashIn").textContent=usd(tin);
-document.getElementById("dashOut").textContent=usd(tout);
-document.getElementById("summaryCount").textContent=transactions.length;
-document.getElementById("summaryLargest").textContent=usd(Math.max(0,...transactions.map(t=>+t.amount)));
-document.getElementById("summaryRate").textContent=idr(last.rate);
-document.getElementById("summaryWallets").textContent=wallets.length;
-renderRecent(r);renderLedger(r);renderWallets();renderQuickLists();renderReports();populateWallets();drawChart()
+let stores = [...seedStores];
+let activeStoreId = localStorage.getItem("lpv2_activeStoreId") || "all";
+
+if (
+  activeStoreId !== "all" &&
+  !stores.some(store => store.id === activeStoreId)
+) {
+  activeStoreId = "all";
 }
 
-function renderRecent(r){
-const b=document.getElementById("recentBody");b.innerHTML="";
-[...r].reverse().slice(0,5).forEach(t=>{const tr=document.createElement("tr");tr.innerHTML=`<td>${dateLabel(t.date)}</td><td>${esc(t.note)}</td><td>${esc(t.wallet)}</td><td><span class="badge ${t.type}">${t.type==="in"?"MASUK":"KELUAR"}</span></td><td class="${t.type==="in"?"green":"red"}">${usd(t.amount)}</td><td><strong>${usd(t.balance)}</strong></td>`;b.appendChild(tr)})
-}
-function renderLedger(r=rows()){
-const q=document.getElementById("searchLedger").value.toLowerCase(),w=document.getElementById("filterWallet").value,tp=document.getElementById("filterType").value,d=document.getElementById("filterDate").value;
-const b=document.getElementById("ledgerBody");b.innerHTML="";
-r.filter(t=>(!q||t.note.toLowerCase().includes(q))&&(!w||t.wallet===w)&&(!tp||t.type===tp)&&(!d||t.date===d)).forEach(t=>{const tr=document.createElement("tr");tr.innerHTML=`<td>${dateLabel(t.date)}</td><td>${esc(t.note)}</td><td>${esc(t.wallet)}</td><td>${idr(t.rate)}</td><td class="green">${t.type==="in"?usd(t.amount):"-"}</td><td class="red">${t.type==="out"?usd(t.amount):"-"}</td><td><strong>${usd(t.balance)}</strong></td><td>${idr(t.idrBalance)}</td><td><div class="action-group"><button class="icon-action" onclick="editTx(${t.id})">Edit</button><button class="icon-action delete" onclick="deleteTx(${t.id})">Hapus</button></div></td>`;b.appendChild(tr)})
-}
-function renderWallets(){
-const c=document.getElementById("walletCards");c.innerHTML="";
-wallets.forEach(w=>{const a=document.createElement("article");a.className="metric wallet-card";a.innerHTML=`<div class="wallet-top"><div><span>${esc(w.type)}</span><h3>${esc(w.name)}</h3></div><span class="wallet-dot ${w.color}"></span></div><strong>${usd(walletBalance(w.name))}</strong><small>Saldo wallet</small>`;c.appendChild(a)})
-}
-function renderQuickLists(){
-const cin=document.getElementById("cashInList"),cout=document.getElementById("cashOutList");
-cin.innerHTML="";cout.innerHTML="";
-transactions.filter(t=>t.type==="in").slice(-6).reverse().forEach(t=>cin.innerHTML+=`<div class="transaction-item"><div><strong>${esc(t.note)}</strong><small>${dateLabel(t.date)} • ${esc(t.wallet)}</small></div><strong class="green">${usd(t.amount)}</strong></div>`);
-transactions.filter(t=>t.type==="out").slice(-6).reverse().forEach(t=>cout.innerHTML+=`<div class="transaction-item"><div><strong>${esc(t.note)}</strong><small>${dateLabel(t.date)} • ${esc(t.wallet)}</small></div><strong class="red">${usd(t.amount)}</strong></div>`)
-}
-function renderReports(){
-const s=monthly(),b=document.getElementById("reportBody");b.innerHTML="";
-s.forEach(x=>{const net=x.in-x.out;const label=new Date(x.month+"-01T00:00:00").toLocaleDateString("id-ID",{month:"long",year:"numeric"});b.innerHTML+=`<tr><td>${label}</td><td class="green">${usd(x.in)}</td><td class="red">${usd(x.out)}</td><td class="${net>=0?"green":"red"}">${usd(net)}</td><td>${x.count}</td></tr>`});
-const cur=new Date().toISOString().slice(0,7),m=s.find(x=>x.month===cur)||{in:0,out:0};document.getElementById("reportIn").textContent=usd(m.in);document.getElementById("reportOut").textContent=usd(m.out);document.getElementById("reportNet").textContent=usd(m.in-m.out)
-}
-function populateWallets(){
-const opts=wallets.map(w=>`<option>${esc(w.name)}</option>`).join("");
-document.querySelectorAll('select[name="wallet"]').forEach(s=>{const old=s.value;s.innerHTML=opts;if(old)s.value=old});
-const f=document.getElementById("filterWallet"),old=f.value;f.innerHTML='<option value="">Semua wallet</option>'+opts;if(old)f.value=old
-}
-function drawChart(){
-const c=document.getElementById("cashflowChart");if(!c)return;const ctx=c.getContext("2d"),ratio=devicePixelRatio||1,w=c.clientWidth||700,h=240;c.width=w*ratio;c.height=h*ratio;ctx.scale(ratio,ratio);ctx.clearRect(0,0,w,h);
-const s=monthly().slice(-8),max=Math.max(1,...s.flatMap(x=>[x.in,x.out])),pad=34,ch=h-60,cw=w-pad*2;ctx.strokeStyle=getComputedStyle(document.body).getPropertyValue("--border").trim();ctx.fillStyle=getComputedStyle(document.body).getPropertyValue("--muted").trim();ctx.font="12px Arial";
-for(let i=0;i<=4;i++){const y=18+ch/4*i;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(w-pad,y);ctx.stroke()}
-if(!s.length){ctx.fillText("Belum ada data",pad,100);return}
-const gw=cw/s.length;s.forEach((x,i)=>{const bx=pad+i*gw+gw*.18,bw=gw*.24,ih=x.in/max*ch,oh=x.out/max*ch;ctx.fillStyle="#16803d";ctx.fillRect(bx,18+ch-ih,bw,ih);ctx.fillStyle="#c62828";ctx.fillRect(bx+bw+5,18+ch-oh,bw,oh);ctx.fillStyle=getComputedStyle(document.body).getPropertyValue("--muted").trim();ctx.fillText(new Date(x.month+"-01").toLocaleDateString("id-ID",{month:"short"}),bx,h-16)})
+const seedWallets = seedStores.flatMap((store, index) => [
+  {
+    id: `${store.id}-ledger`,
+    name: "Ledger",
+    type: "Crypto",
+    balance: 0,
+    color: "blue",
+    storeId: store.id
+  },
+  {
+    id: `${store.id}-bca`,
+    name: "BCA",
+    type: "Bank",
+    balance: 0,
+    color: "green",
+    storeId: store.id
+  },
+  {
+    id: `${store.id}-kas`,
+    name: "Kas",
+    type: "Kas",
+    balance: 0,
+    color: "orange",
+    storeId: store.id
+  }
+]);
+
+const seedTransactions = [
+  {
+    id: 1,
+    date: "2024-04-24",
+    note: "Saldo awal",
+    wallet: "Ledger",
+    type: "in",
+    amount: 30000,
+    rate: 16300,
+    reference: "",
+    storeId: "toko-g"
+  },
+  {
+    id: 2,
+    date: "2024-04-24",
+    note: "Transfer masuk",
+    wallet: "Ledger",
+    type: "in",
+    amount: 31336.39,
+    rate: 16300,
+    reference: "",
+    storeId: "toko-g"
+  },
+  {
+    id: 3,
+    date: "2024-04-24",
+    note: "Transfer masuk",
+    wallet: "BCA",
+    type: "in",
+    amount: 7001,
+    rate: 16300,
+    reference: "",
+    storeId: "toko-g"
+  },
+  {
+    id: 4,
+    date: "2024-04-25",
+    note: "Transfer masuk",
+    wallet: "Ledger",
+    type: "in",
+    amount: 9231.47,
+    rate: 16300,
+    reference: "",
+    storeId: "toko-g"
+  },
+  {
+    id: 5,
+    date: "2024-04-27",
+    note: "Pengeluaran operasional",
+    wallet: "Kas",
+    type: "out",
+    amount: 30000,
+    rate: 16300,
+    reference: "",
+    storeId: "toko-g"
+  },
+  {
+    id: 6,
+    date: "2024-04-27",
+    note: "Pengeluaran",
+    wallet: "Kas",
+    type: "out",
+    amount: 2000,
+    rate: 16300,
+    reference: "",
+    storeId: "toko-g"
+  },
+  {
+    id: 7,
+    date: "2024-05-01",
+    note: "Transfer masuk",
+    wallet: "BCA",
+    type: "in",
+    amount: 2000,
+    rate: 16333,
+    reference: "",
+    storeId: "toko-g"
+  },
+  {
+    id: 8,
+    date: "2024-05-02",
+    note: "Pengeluaran",
+    wallet: "Kas",
+    type: "out",
+    amount: 5000,
+    rate: 16333,
+    reference: "",
+    storeId: "toko-g"
+  }
+];
+
+const defaultSettings = {
+  appName: "Ledger Pro",
+  defaultRate: 16300,
+  dateFormat: "id-ID",
+  currency: "USD",
+  theme: "light"
+};
+
+let wallets = safeParse("lpv2_wallets", structuredClone(seedWallets));
+let transactions = safeParse(
+  "lpv2_transactions",
+  structuredClone(seedTransactions)
+);
+let settings = safeParse(
+  "lpv2_settings",
+  structuredClone(defaultSettings)
+);
+let editingId = null;
+
+wallets = wallets.map(wallet => ({
+  ...wallet,
+  storeId:
+    !wallet.storeId || wallet.storeId === "toko-utama"
+      ? "toko-g"
+      : wallet.storeId
+}));
+
+transactions = transactions.map(transaction => ({
+  ...transaction,
+  storeId:
+    !transaction.storeId || transaction.storeId === "toko-utama"
+      ? "toko-g"
+      : transaction.storeId
+}));
+
+seedStores.forEach(store => {
+  [
+    { name: "Ledger", type: "Crypto", color: "blue" },
+    { name: "BCA", type: "Bank", color: "green" },
+    { name: "Kas", type: "Kas", color: "orange" }
+  ].forEach(defaultWallet => {
+    const exists = wallets.some(
+      wallet =>
+        wallet.storeId === store.id &&
+        wallet.name.toLowerCase() === defaultWallet.name.toLowerCase()
+    );
+
+    if (!exists) {
+      wallets.push({
+        id: `${store.id}-${defaultWallet.name.toLowerCase()}-${Date.now()}`,
+        name: defaultWallet.name,
+        type: defaultWallet.type,
+        balance: 0,
+        color: defaultWallet.color,
+        storeId: store.id
+      });
+    }
+  });
+});
+
+const meta = {
+  dashboard: ["Dashboard", "Ringkasan kondisi keuangan."],
+  ledger: ["Ledger", "Kelola seluruh transaksi."],
+  cashin: ["Cash In", "Tambah dan pantau uang masuk."],
+  cashout: ["Cash Out", "Tambah dan pantau uang keluar."],
+  wallets: ["Wallet", "Kelola bank, crypto wallet, dan kas."],
+  reports: ["Laporan", "Rekap keuangan bulanan."],
+  settings: ["Pengaturan", "Atur preferensi aplikasi."]
+};
+
+function save() {
+  localStorage.setItem("lpv2_wallets", JSON.stringify(wallets));
+  localStorage.setItem("lpv2_transactions", JSON.stringify(transactions));
+  localStorage.setItem("lpv2_settings", JSON.stringify(settings));
+  localStorage.setItem("lpv2_stores", JSON.stringify(stores));
+  localStorage.setItem("lpv2_activeStoreId", activeStoreId);
 }
 
-function openModal(item=null){
-editingId=item?.id||null;const f=document.getElementById("transactionForm");document.getElementById("transactionModalTitle").textContent=item?"Edit Transaksi":"Tambah Transaksi";f.date.value=item?.date||new Date().toISOString().slice(0,10);f.wallet.value=item?.wallet||wallets[0]?.name||"";f.type.value=item?.type||"in";f.rate.value=item?.rate||settings.defaultRate;f.note.value=item?.note||"";f.amount.value=item?.amount||"";f.reference.value=item?.reference||"";document.getElementById("transactionModal").classList.add("show")
-}
-function closeModal(){document.getElementById("transactionModal").classList.remove("show");editingId=null}
-function saveTx(data,typeOverride=null){
-const tx={date:data.get("date"),wallet:data.get("wallet"),type:typeOverride||data.get("type"),rate:+data.get("rate"),note:data.get("note").trim(),amount:+data.get("amount"),reference:(data.get("reference")||"").trim()};
-if(!tx.date||!tx.wallet||!tx.note||!tx.rate||!tx.amount){alert("Lengkapi semua data wajib.");return false}
-if(editingId){transactions=transactions.map(t=>t.id===editingId?{...t,...tx}:t)}else{tx.id=transactions.length?Math.max(...transactions.map(t=>t.id))+1:1;transactions.push(tx)}
-save();render();toast(editingId?"Transaksi diperbarui.":"Transaksi ditambahkan.");return true
-}
-window.editTx=id=>{const t=transactions.find(x=>x.id===id);if(t)openModal(t)};
-window.deleteTx=id=>{const t=transactions.find(x=>x.id===id);if(t&&confirm(`Hapus transaksi "${t.note}"?`)){transactions=transactions.filter(x=>x.id!==id);save();render();toast("Transaksi dihapus.")}};
+save();
 
-function exportCsv(name,rows){const csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\n");const blob=new Blob([csv],{type:"text/csv"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;a.click();URL.revokeObjectURL(url)}
-function exportAll(){exportCsv("ledger-pro-transactions.csv",[["Tanggal","Keterangan","Wallet","Tipe","Rate","Nominal"],...transactions.map(t=>[t.date,t.note,t.wallet,t.type,t.rate,t.amount])])}
-function exportReport(){exportCsv("ledger-pro-report.csv",[["Bulan","Masuk","Keluar","Net","Jumlah"],...monthly().map(x=>[x.month,x.in,x.out,x.in-x.out,x.count])])}
+function usd(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD"
+  }).format(Number(value || 0));
+}
 
-document.getElementById("loginButton").onclick=()=>{document.getElementById("loginScreen").classList.add("hidden");document.getElementById("app").classList.remove("hidden");render()};
-document.getElementById("logoutButton").onclick=()=>{document.getElementById("app").classList.add("hidden");document.getElementById("loginScreen").classList.remove("hidden")};
-document.getElementById("sidebarNav").onclick=e=>{const b=e.target.closest(".nav-item");if(b)showPage(b.dataset.page)};
-document.querySelectorAll("[data-jump]").forEach(b=>b.onclick=()=>showPage(b.dataset.jump));
-document.getElementById("openTransactionModal").onclick=()=>openModal();
-document.getElementById("closeTransactionModal").onclick=closeModal;document.getElementById("cancelTransactionModal").onclick=closeModal;
-document.getElementById("transactionForm").onsubmit=e=>{e.preventDefault();if(saveTx(new FormData(e.target)))closeModal()};
-document.getElementById("cashInForm").onsubmit=e=>{e.preventDefault();if(saveTx(new FormData(e.target),"in")){e.target.reset();e.target.date.value=new Date().toISOString().slice(0,10);e.target.rate.value=settings.defaultRate}};
-document.getElementById("cashOutForm").onsubmit=e=>{e.preventDefault();if(saveTx(new FormData(e.target),"out")){e.target.reset();e.target.date.value=new Date().toISOString().slice(0,10);e.target.rate.value=settings.defaultRate}};
-document.getElementById("walletForm").onsubmit=e=>{e.preventDefault();const d=new FormData(e.target),name=d.get("name").trim();if(wallets.some(w=>w.name.toLowerCase()===name.toLowerCase())){alert("Nama wallet sudah ada.");return}wallets.push({id:Date.now(),name,type:d.get("type"),balance:+d.get("balance")||0,color:d.get("color")});save();render();e.target.reset();toast("Wallet ditambahkan.")};
-["searchLedger","filterWallet","filterType","filterDate"].forEach(id=>document.getElementById(id).oninput=()=>renderLedger());
-document.getElementById("exportAll").onclick=exportAll;document.getElementById("exportReport").onclick=exportReport;
-document.getElementById("themeToggle").onclick=()=>{settings.theme=settings.theme==="dark"?"light":"dark";save();applyTheme()};
-document.getElementById("settingsForm").onsubmit=e=>{e.preventDefault();const d=new FormData(e.target);settings.appName=d.get("appName")||"Ledger Pro";settings.defaultRate=+d.get("defaultRate")||16300;settings.dateFormat=d.get("dateFormat");settings.currency=d.get("currency");document.querySelector(".brand strong").textContent=settings.appName;save();render();toast("Pengaturan disimpan.")};
-document.getElementById("resetDemo").onclick=()=>{if(confirm("Reset semua data demo?")){wallets=structuredClone(seedWallets);transactions=structuredClone(seedTransactions);settings=structuredClone(defaultSettings);save();location.reload()}};
-function applyTheme(){document.body.classList.toggle("dark",settings.theme==="dark");document.getElementById("themeToggle").textContent=settings.theme==="dark"?"☀️ Light mode":"🌙 Dark mode";setTimeout(drawChart,20)}
-document.querySelectorAll('input[type="date"]').forEach(i=>i.value=new Date().toISOString().slice(0,10));
-document.querySelector(".brand strong").textContent=settings.appName;document.querySelector('#settingsForm [name="appName"]').value=settings.appName;document.querySelector('#settingsForm [name="defaultRate"]').value=settings.defaultRate;document.querySelector('#settingsForm [name="dateFormat"]').value=settings.dateFormat;document.querySelector('#settingsForm [name="currency"]').value=settings.currency;
-applyTheme();populateWallets();render();
+function idr(value) {
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0
+  }).format(Number(value || 0));
+}
+
+function dateLabel(value) {
+  return new Date(`${value}T00:00:00`).toLocaleDateString(
+    settings.dateFormat || "id-ID",
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric"
+    }
+  );
+}
+
+function esc(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function toast(message) {
+  const element = document.getElementById("toast");
+  if (!element) return;
+
+  element.textContent = message;
+  element.classList.add("show");
+
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => {
+    element.classList.remove("show");
+  }, 2200);
+}
+
+function getStoreName(storeId) {
+  return stores.find(store => store.id === storeId)?.name || "TOKO G";
+}
+
+function getFilteredTransactions() {
+  if (activeStoreId === "all") return transactions;
+
+  return transactions.filter(
+    transaction => transaction.storeId === activeStoreId
+  );
+}
+
+function getFilteredWallets() {
+  if (activeStoreId === "all") return wallets;
+
+  return wallets.filter(wallet => wallet.storeId === activeStoreId);
+}
+
+function rows() {
+  let balance = 0;
+
+  return [...getFilteredTransactions()]
+    .sort(
+      (a, b) =>
+        new Date(a.date) - new Date(b.date) ||
+        Number(a.id) - Number(b.id)
+    )
+    .map(transaction => {
+      balance +=
+        transaction.type === "in"
+          ? Number(transaction.amount)
+          : -Number(transaction.amount);
+
+      return {
+        ...transaction,
+        balance,
+        idrBalance: balance * Number(transaction.rate || 0)
+      };
+    });
+}
+
+function walletBalance(wallet) {
+  const transactionBalance = transactions
+    .filter(
+      transaction =>
+        transaction.storeId === wallet.storeId &&
+        transaction.wallet === wallet.name
+    )
+    .reduce(
+      (total, transaction) =>
+        total +
+        (transaction.type === "in"
+          ? Number(transaction.amount)
+          : -Number(transaction.amount)),
+      0
+    );
+
+  return transactionBalance + Number(wallet.balance || 0);
+}
+
+function monthly() {
+  const result = {};
+
+  getFilteredTransactions().forEach(transaction => {
+    const monthKey = transaction.date.slice(0, 7);
+
+    if (!result[monthKey]) {
+      result[monthKey] = {
+        month: monthKey,
+        in: 0,
+        out: 0,
+        count: 0
+      };
+    }
+
+    result[monthKey].count += 1;
+    result[monthKey][transaction.type] += Number(transaction.amount);
+  });
+
+  return Object.values(result).sort((a, b) =>
+    a.month.localeCompare(b.month)
+  );
+}
+
+function injectStoreStyles() {
+  if (document.getElementById("multiStoreStyles")) return;
+
+  const style = document.createElement("style");
+  style.id = "multiStoreStyles";
+  style.textContent = `
+    .store-selector {
+      min-width: 155px;
+      height: 42px;
+      padding: 0 36px 0 12px;
+      border: 1px solid var(--border, #d9dee7);
+      border-radius: 9px;
+      background: var(--card, #fff);
+      color: var(--text, #172033);
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .store-name-small {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted, #6b778c);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    @media (max-width: 760px) {
+      .store-selector {
+        width: 100%;
+      }
+    }
+  `;
+
+  document.head.appendChild(style);
+}
+
+function ensureStoreSelector() {
+  let selector = document.getElementById("storeSelector");
+
+  if (!selector) {
+    const exportButton = document.getElementById("exportAll");
+    const actions = exportButton?.parentElement;
+
+    if (!actions) return null;
+
+    selector = document.createElement("select");
+    selector.id = "storeSelector";
+    selector.className = "store-selector";
+    selector.setAttribute("aria-label", "Pilih toko");
+    actions.insertBefore(selector, exportButton);
+  }
+
+  return selector;
+}
+
+function populateStores() {
+  const selector = ensureStoreSelector();
+  if (!selector) return;
+
+  selector.innerHTML = "";
+
+  if (currentUser.role === "superadmin") {
+    selector.add(new Option("Semua Toko", "all"));
+  }
+
+  stores.forEach(store => {
+    selector.add(new Option(store.name, store.id));
+  });
+
+  selector.value = activeStoreId;
+
+  selector.onchange = event => {
+    activeStoreId = event.target.value;
+    save();
+    render();
+
+    toast(
+      activeStoreId === "all"
+        ? "Menampilkan semua toko."
+        : `Dashboard ${getStoreName(activeStoreId)}`
+    );
+  };
+}
+
+function showPage(page) {
+  document
+    .querySelectorAll(".page")
+    .forEach(element => element.classList.remove("active"));
+
+  document
+    .querySelectorAll(".nav-item")
+    .forEach(element => element.classList.remove("active"));
+
+  document.getElementById(`${page}Page`)?.classList.add("active");
+  document
+    .querySelector(`[data-page="${page}"]`)
+    ?.classList.add("active");
+
+  const pageTitle = document.getElementById("pageTitle");
+  const pageSubtitle = document.getElementById("pageSubtitle");
+
+  if (pageTitle && meta[page]) pageTitle.textContent = meta[page][0];
+  if (pageSubtitle && meta[page]) {
+    pageSubtitle.textContent = meta[page][1];
+  }
+
+  const hideTransactionButton =
+    page === "settings" || page === "wallets";
+
+  const openButton = document.getElementById("openTransactionModal");
+  const exportButton = document.getElementById("exportAll");
+
+  if (openButton) {
+    openButton.style.display = hideTransactionButton ? "none" : "";
+  }
+
+  if (exportButton) {
+    exportButton.style.display = page === "settings" ? "none" : "";
+  }
+
+  if (page === "dashboard") drawChart();
+}
+
+function render() {
+  const filteredTransactions = getFilteredTransactions();
+  const filteredWallets = getFilteredWallets();
+  const calculatedRows = rows();
+
+  const last = calculatedRows.at(-1) || {
+    balance: 0,
+    idrBalance: 0,
+    rate: settings.defaultRate
+  };
+
+  const totalIn = filteredTransactions
+    .filter(transaction => transaction.type === "in")
+    .reduce(
+      (total, transaction) => total + Number(transaction.amount),
+      0
+    );
+
+  const totalOut = filteredTransactions
+    .filter(transaction => transaction.type === "out")
+    .reduce(
+      (total, transaction) => total + Number(transaction.amount),
+      0
+    );
+
+  const setText = (id, value) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value;
+  };
+
+  setText("dashUsd", usd(last.balance));
+  setText("dashIdr", idr(last.idrBalance));
+  setText("dashIn", usd(totalIn));
+  setText("dashOut", usd(totalOut));
+  setText("summaryCount", filteredTransactions.length);
+  setText(
+    "summaryLargest",
+    usd(
+      Math.max(
+        0,
+        ...filteredTransactions.map(transaction =>
+          Number(transaction.amount)
+        )
+      )
+    )
+  );
+  setText("summaryRate", idr(last.rate));
+  setText("summaryWallets", filteredWallets.length);
+
+  renderRecent(calculatedRows);
+  renderLedger(calculatedRows);
+  renderWallets();
+  renderQuickLists();
+  renderReports();
+  populateWallets();
+  drawChart();
+}
+
+function storeLabel(transaction) {
+  if (activeStoreId !== "all") return "";
+
+  return `<span class="store-name-small">${esc(
+    getStoreName(transaction.storeId)
+  )}</span>`;
+}
+
+function renderRecent(calculatedRows) {
+  const body = document.getElementById("recentBody");
+  if (!body) return;
+
+  body.innerHTML = "";
+
+  [...calculatedRows]
+    .reverse()
+    .slice(0, 5)
+    .forEach(transaction => {
+      const row = document.createElement("tr");
+
+      row.innerHTML = `
+        <td>${dateLabel(transaction.date)}</td>
+        <td>
+          ${esc(transaction.note)}
+          ${storeLabel(transaction)}
+        </td>
+        <td>${esc(transaction.wallet)}</td>
+        <td>
+          <span class="badge ${transaction.type}">
+            ${transaction.type === "in" ? "MASUK" : "KELUAR"}
+          </span>
+        </td>
+        <td class="${transaction.type === "in" ? "green" : "red"}">
+          ${usd(transaction.amount)}
+        </td>
+        <td><strong>${usd(transaction.balance)}</strong></td>
+      `;
+
+      body.appendChild(row);
+    });
+}
+
+function renderLedger(calculatedRows = rows()) {
+  const search =
+    document.getElementById("searchLedger")?.value.toLowerCase() || "";
+  const walletFilter =
+    document.getElementById("filterWallet")?.value || "";
+  const typeFilter =
+    document.getElementById("filterType")?.value || "";
+  const dateFilter =
+    document.getElementById("filterDate")?.value || "";
+
+  const body = document.getElementById("ledgerBody");
+  if (!body) return;
+
+  body.innerHTML = "";
+
+  calculatedRows
+    .filter(
+      transaction =>
+        (!search ||
+          transaction.note.toLowerCase().includes(search) ||
+          getStoreName(transaction.storeId)
+            .toLowerCase()
+            .includes(search)) &&
+        (!walletFilter || transaction.wallet === walletFilter) &&
+        (!typeFilter || transaction.type === typeFilter) &&
+        (!dateFilter || transaction.date === dateFilter)
+    )
+    .forEach(transaction => {
+      const row = document.createElement("tr");
+
+      row.innerHTML = `
+        <td>${dateLabel(transaction.date)}</td>
+        <td>
+          ${esc(transaction.note)}
+          ${storeLabel(transaction)}
+        </td>
+        <td>${esc(transaction.wallet)}</td>
+        <td>${idr(transaction.rate)}</td>
+        <td class="green">
+          ${transaction.type === "in" ? usd(transaction.amount) : "-"}
+        </td>
+        <td class="red">
+          ${transaction.type === "out" ? usd(transaction.amount) : "-"}
+        </td>
+        <td><strong>${usd(transaction.balance)}</strong></td>
+        <td>${idr(transaction.idrBalance)}</td>
+        <td>
+          <div class="action-group">
+            <button class="icon-action" onclick="editTx(${transaction.id})">
+              Edit
+            </button>
+            <button class="icon-action delete" onclick="deleteTx(${transaction.id})">
+              Hapus
+            </button>
+          </div>
+        </td>
+      `;
+
+      body.appendChild(row);
+    });
+}
+
+function renderWallets() {
+  const container = document.getElementById("walletCards");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  getFilteredWallets().forEach(wallet => {
+    const card = document.createElement("article");
+    card.className = "metric wallet-card";
+
+    card.innerHTML = `
+      <div class="wallet-top">
+        <div>
+          <span>
+            ${esc(wallet.type)}
+            ${
+              activeStoreId === "all"
+                ? ` • ${esc(getStoreName(wallet.storeId))}`
+                : ""
+            }
+          </span>
+          <h3>${esc(wallet.name)}</h3>
+        </div>
+        <span class="wallet-dot ${wallet.color}"></span>
+      </div>
+      <strong>${usd(walletBalance(wallet))}</strong>
+      <small>Saldo wallet</small>
+    `;
+
+    container.appendChild(card);
+  });
+}
+
+function renderQuickLists() {
+  const filteredTransactions = getFilteredTransactions();
+  const cashInList = document.getElementById("cashInList");
+  const cashOutList = document.getElementById("cashOutList");
+
+  if (!cashInList || !cashOutList) return;
+
+  cashInList.innerHTML = "";
+  cashOutList.innerHTML = "";
+
+  filteredTransactions
+    .filter(transaction => transaction.type === "in")
+    .slice(-6)
+    .reverse()
+    .forEach(transaction => {
+      cashInList.innerHTML += `
+        <div class="transaction-item">
+          <div>
+            <strong>${esc(transaction.note)}</strong>
+            <small>
+              ${dateLabel(transaction.date)} • ${esc(transaction.wallet)}
+              ${
+                activeStoreId === "all"
+                  ? ` • ${esc(getStoreName(transaction.storeId))}`
+                  : ""
+              }
+            </small>
+          </div>
+          <strong class="green">${usd(transaction.amount)}</strong>
+        </div>
+      `;
+    });
+
+  filteredTransactions
+    .filter(transaction => transaction.type === "out")
+    .slice(-6)
+    .reverse()
+    .forEach(transaction => {
+      cashOutList.innerHTML += `
+        <div class="transaction-item">
+          <div>
+            <strong>${esc(transaction.note)}</strong>
+            <small>
+              ${dateLabel(transaction.date)} • ${esc(transaction.wallet)}
+              ${
+                activeStoreId === "all"
+                  ? ` • ${esc(getStoreName(transaction.storeId))}`
+                  : ""
+              }
+            </small>
+          </div>
+          <strong class="red">${usd(transaction.amount)}</strong>
+        </div>
+      `;
+    });
+}
+
+function renderReports() {
+  const summary = monthly();
+  const body = document.getElementById("reportBody");
+
+  if (body) {
+    body.innerHTML = "";
+
+    summary.forEach(item => {
+      const net = item.in - item.out;
+      const label = new Date(
+        `${item.month}-01T00:00:00`
+      ).toLocaleDateString("id-ID", {
+        month: "long",
+        year: "numeric"
+      });
+
+      body.innerHTML += `
+        <tr>
+          <td>${label}</td>
+          <td class="green">${usd(item.in)}</td>
+          <td class="red">${usd(item.out)}</td>
+          <td class="${net >= 0 ? "green" : "red"}">${usd(net)}</td>
+          <td>${item.count}</td>
+        </tr>
+      `;
+    });
+  }
+
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const current = summary.find(item => item.month === currentMonth) || {
+    in: 0,
+    out: 0
+  };
+
+  const setText = (id, value) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value;
+  };
+
+  setText("reportIn", usd(current.in));
+  setText("reportOut", usd(current.out));
+  setText("reportNet", usd(current.in - current.out));
+}
+
+function populateWallets() {
+  const walletOptions = getFilteredWallets()
+    .map(
+      wallet =>
+        `<option value="${esc(wallet.name)}">${esc(wallet.name)}${
+          activeStoreId === "all"
+            ? ` — ${esc(getStoreName(wallet.storeId))}`
+            : ""
+        }</option>`
+    )
+    .join("");
+
+  document.querySelectorAll('select[name="wallet"]').forEach(select => {
+    const oldValue = select.value;
+    select.innerHTML = walletOptions;
+
+    if (
+      oldValue &&
+      [...select.options].some(option => option.value === oldValue)
+    ) {
+      select.value = oldValue;
+    }
+  });
+
+  const filter = document.getElementById("filterWallet");
+
+  if (filter) {
+    const oldValue = filter.value;
+    filter.innerHTML =
+      '<option value="">Semua wallet</option>' + walletOptions;
+
+    if (
+      oldValue &&
+      [...filter.options].some(option => option.value === oldValue)
+    ) {
+      filter.value = oldValue;
+    }
+  }
+}
+
+function drawChart() {
+  const canvas = document.getElementById("cashflowChart");
+  if (!canvas) return;
+
+  const context = canvas.getContext("2d");
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth || 700;
+  const height = 240;
+
+  canvas.width = width * ratio;
+  canvas.height = height * ratio;
+
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  const summary = monthly().slice(-8);
+  const maximum = Math.max(
+    1,
+    ...summary.flatMap(item => [item.in, item.out])
+  );
+
+  const padding = 34;
+  const chartHeight = height - 60;
+  const chartWidth = width - padding * 2;
+  const styles = getComputedStyle(document.body);
+
+  context.strokeStyle = styles.getPropertyValue("--border").trim() || "#ddd";
+  context.fillStyle = styles.getPropertyValue("--muted").trim() || "#777";
+  context.font = "12px Arial";
+
+  for (let index = 0; index <= 4; index += 1) {
+    const y = 18 + (chartHeight / 4) * index;
+    context.beginPath();
+    context.moveTo(padding, y);
+    context.lineTo(width - padding, y);
+    context.stroke();
+  }
+
+  if (!summary.length) {
+    context.fillText("Belum ada data", padding, 100);
+    return;
+  }
+
+  const groupWidth = chartWidth / summary.length;
+
+  summary.forEach((item, index) => {
+    const barX = padding + index * groupWidth + groupWidth * 0.18;
+    const barWidth = groupWidth * 0.24;
+    const inHeight = (item.in / maximum) * chartHeight;
+    const outHeight = (item.out / maximum) * chartHeight;
+
+    context.fillStyle = "#16803d";
+    context.fillRect(
+      barX,
+      18 + chartHeight - inHeight,
+      barWidth,
+      inHeight
+    );
+
+    context.fillStyle = "#c62828";
+    context.fillRect(
+      barX + barWidth + 5,
+      18 + chartHeight - outHeight,
+      barWidth,
+      outHeight
+    );
+
+    context.fillStyle =
+      styles.getPropertyValue("--muted").trim() || "#777";
+
+    context.fillText(
+      new Date(`${item.month}-01`).toLocaleDateString("id-ID", {
+        month: "short"
+      }),
+      barX,
+      height - 16
+    );
+  });
+}
+
+function requireSelectedStore() {
+  if (activeStoreId !== "all") return true;
+
+  alert("Pilih salah satu toko dulu sebelum menambah data.");
+  return false;
+}
+
+function openModal(item = null) {
+  if (!item && !requireSelectedStore()) return;
+
+  editingId = item?.id || null;
+
+  const form = document.getElementById("transactionForm");
+  if (!form) return;
+
+  const title = document.getElementById("transactionModalTitle");
+  if (title) {
+    title.textContent = item ? "Edit Transaksi" : "Tambah Transaksi";
+  }
+
+  form.date.value =
+    item?.date || new Date().toISOString().slice(0, 10);
+  form.wallet.value =
+    item?.wallet || getFilteredWallets()[0]?.name || "";
+  form.type.value = item?.type || "in";
+  form.rate.value = item?.rate || settings.defaultRate;
+  form.note.value = item?.note || "";
+  form.amount.value = item?.amount || "";
+  form.reference.value = item?.reference || "";
+
+  document.getElementById("transactionModal")?.classList.add("show");
+}
+
+function closeModal() {
+  document.getElementById("transactionModal")?.classList.remove("show");
+  editingId = null;
+}
+
+function saveTx(data, typeOverride = null) {
+  const currentItem = editingId
+    ? transactions.find(transaction => transaction.id === editingId)
+    : null;
+
+  const storeId = currentItem?.storeId || activeStoreId;
+
+  if (storeId === "all") {
+    alert("Pilih salah satu toko dulu.");
+    return false;
+  }
+
+  const transaction = {
+    date: data.get("date"),
+    wallet: data.get("wallet"),
+    type: typeOverride || data.get("type"),
+    rate: Number(data.get("rate")),
+    note: String(data.get("note") || "").trim(),
+    amount: Number(data.get("amount")),
+    reference: String(data.get("reference") || "").trim(),
+    storeId
+  };
+
+  if (
+    !transaction.date ||
+    !transaction.wallet ||
+    !transaction.note ||
+    !transaction.rate ||
+    !transaction.amount
+  ) {
+    alert("Lengkapi semua data wajib.");
+    return false;
+  }
+
+  if (editingId) {
+    transactions = transactions.map(item =>
+      item.id === editingId
+        ? { ...item, ...transaction }
+        : item
+    );
+  } else {
+    transaction.id = transactions.length
+      ? Math.max(...transactions.map(item => Number(item.id) || 0)) + 1
+      : 1;
+
+    transactions.push(transaction);
+  }
+
+  const wasEditing = Boolean(editingId);
+
+  save();
+  render();
+  toast(
+    wasEditing
+      ? "Transaksi diperbarui."
+      : `Transaksi ditambahkan ke ${getStoreName(storeId)}.`
+  );
+
+  return true;
+}
+
+window.editTx = id => {
+  const transaction = transactions.find(item => item.id === id);
+  if (transaction) openModal(transaction);
+};
+
+window.deleteTx = id => {
+  const transaction = transactions.find(item => item.id === id);
+
+  if (
+    transaction &&
+    confirm(`Hapus transaksi "${transaction.note}"?`)
+  ) {
+    transactions = transactions.filter(item => item.id !== id);
+    save();
+    render();
+    toast("Transaksi dihapus.");
+  }
+};
+
+function exportCsv(name, dataRows) {
+  const csv = dataRows
+    .map(row =>
+      row
+        .map(value => `"${String(value).replaceAll('"', '""')}"`)
+        .join(",")
+    )
+    .join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+
+  URL.revokeObjectURL(url);
+}
+
+function exportAll() {
+  const filteredTransactions = getFilteredTransactions();
+
+  exportCsv(
+    activeStoreId === "all"
+      ? "ledger-pro-semua-toko.csv"
+      : `ledger-pro-${activeStoreId}.csv`,
+    [
+      [
+        "Toko",
+        "Tanggal",
+        "Keterangan",
+        "Wallet",
+        "Tipe",
+        "Rate",
+        "Nominal"
+      ],
+      ...filteredTransactions.map(transaction => [
+        getStoreName(transaction.storeId),
+        transaction.date,
+        transaction.note,
+        transaction.wallet,
+        transaction.type,
+        transaction.rate,
+        transaction.amount
+      ])
+    ]
+  );
+}
+
+function exportReport() {
+  exportCsv("ledger-pro-report.csv", [
+    ["Bulan", "Masuk", "Keluar", "Net", "Jumlah"],
+    ...monthly().map(item => [
+      item.month,
+      item.in,
+      item.out,
+      item.in - item.out,
+      item.count
+    ])
+  ]);
+}
+
+function applyTheme() {
+  document.body.classList.toggle(
+    "dark",
+    settings.theme === "dark"
+  );
+
+  const toggle = document.getElementById("themeToggle");
+
+  if (toggle) {
+    toggle.textContent =
+      settings.theme === "dark"
+        ? "☀️ Light mode"
+        : "🌙 Dark mode";
+  }
+
+  setTimeout(drawChart, 20);
+}
+
+function bindEvents() {
+  document.getElementById("loginButton")?.addEventListener("click", () => {
+    document.getElementById("loginScreen")?.classList.add("hidden");
+    document.getElementById("app")?.classList.remove("hidden");
+    render();
+  });
+
+  document.getElementById("logoutButton")?.addEventListener("click", () => {
+    document.getElementById("app")?.classList.add("hidden");
+    document.getElementById("loginScreen")?.classList.remove("hidden");
+  });
+
+  document.getElementById("sidebarNav")?.addEventListener("click", event => {
+    const button = event.target.closest(".nav-item");
+    if (button) showPage(button.dataset.page);
+  });
+
+  document.querySelectorAll("[data-jump]").forEach(button => {
+    button.addEventListener("click", () => {
+      showPage(button.dataset.jump);
+    });
+  });
+
+  document
+    .getElementById("openTransactionModal")
+    ?.addEventListener("click", () => openModal());
+
+  document
+    .getElementById("closeTransactionModal")
+    ?.addEventListener("click", closeModal);
+
+  document
+    .getElementById("cancelTransactionModal")
+    ?.addEventListener("click", closeModal);
+
+  document
+    .getElementById("transactionForm")
+    ?.addEventListener("submit", event => {
+      event.preventDefault();
+
+      if (saveTx(new FormData(event.target))) {
+        closeModal();
+      }
+    });
+
+  document
+    .getElementById("cashInForm")
+    ?.addEventListener("submit", event => {
+      event.preventDefault();
+
+      if (!requireSelectedStore()) return;
+
+      if (saveTx(new FormData(event.target), "in")) {
+        event.target.reset();
+        event.target.date.value = new Date()
+          .toISOString()
+          .slice(0, 10);
+        event.target.rate.value = settings.defaultRate;
+      }
+    });
+
+  document
+    .getElementById("cashOutForm")
+    ?.addEventListener("submit", event => {
+      event.preventDefault();
+
+      if (!requireSelectedStore()) return;
+
+      if (saveTx(new FormData(event.target), "out")) {
+        event.target.reset();
+        event.target.date.value = new Date()
+          .toISOString()
+          .slice(0, 10);
+        event.target.rate.value = settings.defaultRate;
+      }
+    });
+
+  document
+    .getElementById("walletForm")
+    ?.addEventListener("submit", event => {
+      event.preventDefault();
+
+      if (!requireSelectedStore()) return;
+
+      const data = new FormData(event.target);
+      const name = String(data.get("name") || "").trim();
+
+      if (
+        wallets.some(
+          wallet =>
+            wallet.storeId === activeStoreId &&
+            wallet.name.toLowerCase() === name.toLowerCase()
+        )
+      ) {
+        alert("Nama wallet sudah ada di toko ini.");
+        return;
+      }
+
+      wallets.push({
+        id: `${activeStoreId}-${Date.now()}`,
+        name,
+        type: data.get("type"),
+        balance: Number(data.get("balance")) || 0,
+        color: data.get("color"),
+        storeId: activeStoreId
+      });
+
+      save();
+      render();
+      event.target.reset();
+      toast(`Wallet ditambahkan ke ${getStoreName(activeStoreId)}.`);
+    });
+
+  [
+    "searchLedger",
+    "filterWallet",
+    "filterType",
+    "filterDate"
+  ].forEach(id => {
+    document.getElementById(id)?.addEventListener("input", () => {
+      renderLedger();
+    });
+  });
+
+  document
+    .getElementById("exportAll")
+    ?.addEventListener("click", exportAll);
+
+  document
+    .getElementById("exportReport")
+    ?.addEventListener("click", exportReport);
+
+  document
+    .getElementById("themeToggle")
+    ?.addEventListener("click", () => {
+      settings.theme =
+        settings.theme === "dark" ? "light" : "dark";
+      save();
+      applyTheme();
+    });
+
+  document
+    .getElementById("settingsForm")
+    ?.addEventListener("submit", event => {
+      event.preventDefault();
+
+      const data = new FormData(event.target);
+
+      settings.appName =
+        data.get("appName") || "Ledger Pro";
+      settings.defaultRate =
+        Number(data.get("defaultRate")) || 16300;
+      settings.dateFormat = data.get("dateFormat");
+      settings.currency = data.get("currency");
+
+      const brand = document.querySelector(".brand strong");
+      if (brand) brand.textContent = settings.appName;
+
+      save();
+      render();
+      toast("Pengaturan disimpan.");
+    });
+
+  document
+    .getElementById("resetDemo")
+    ?.addEventListener("click", () => {
+      if (!confirm("Reset semua data demo?")) return;
+
+      wallets = structuredClone(seedWallets);
+      transactions = structuredClone(seedTransactions);
+      settings = structuredClone(defaultSettings);
+      activeStoreId = "all";
+
+      save();
+      location.reload();
+    });
+
+  window.addEventListener("resize", drawChart);
+}
+
+function initialize() {
+  injectStoreStyles();
+  ensureStoreSelector();
+  populateStores();
+  bindEvents();
+
+  document
+    .querySelectorAll('input[type="date"]')
+    .forEach(input => {
+      if (!input.value) {
+        input.value = new Date().toISOString().slice(0, 10);
+      }
+    });
+
+  const brand = document.querySelector(".brand strong");
+  if (brand) brand.textContent = settings.appName;
+
+  const settingsForm = document.getElementById("settingsForm");
+
+  if (settingsForm) {
+    if (settingsForm.elements.appName) {
+      settingsForm.elements.appName.value = settings.appName;
+    }
+    if (settingsForm.elements.defaultRate) {
+      settingsForm.elements.defaultRate.value = settings.defaultRate;
+    }
+    if (settingsForm.elements.dateFormat) {
+      settingsForm.elements.dateFormat.value = settings.dateFormat;
+    }
+    if (settingsForm.elements.currency) {
+      settingsForm.elements.currency.value = settings.currency;
+    }
+  }
+
+  applyTheme();
+  populateWallets();
+  render();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initialize);
+} else {
+  initialize();
+}
