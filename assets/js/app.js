@@ -3102,3 +3102,51 @@ if (document.readyState === "loading") {
 } else {
   initialize();
 }
+
+/* FORCE 12 TOKO — tempel di PALING BAWAH assets/js/app.js */
+(function forceTwelveStores() {
+  const requiredStores = [
+    { id: "toko-g", name: "TOKO G" },
+    { id: "toko-s", name: "TOKO S" },
+    { id: "toko-d", name: "TOKO D" },
+    { id: "toko-p", name: "TOKO P" },
+    { id: "toko-k", name: "TOKO K" },
+    { id: "toko-asc", name: "TOKO ASC" },
+    { id: "toko-sc", name: "TOKO SC" },
+    { id: "toko-lw", name: "TOKO LW" },
+    { id: "toko-mc", name: "TOKO MC" },
+    { id: "toko-nh", name: "TOKO NH" },
+    { id: "toko-dm", name: "TOKO DM" },
+    { id: "toko-wp", name: "TOKO WP" }
+  ];
+
+  function applyTwelveStores() {
+    stores = requiredStores.map(store => ({ ...store }));
+
+    if (
+      activeStoreId !== "all" &&
+      !stores.some(store => store.id === activeStoreId)
+    ) {
+      activeStoreId = "all";
+    }
+
+    localStorage.setItem("lpv2_stores", JSON.stringify(stores));
+    localStorage.setItem("lpv2_activeStoreId", activeStoreId);
+
+    if (typeof populateStores === "function") {
+      populateStores();
+    }
+
+    if (typeof render === "function") {
+      render();
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      setTimeout(applyTwelveStores, 0);
+    });
+  } else {
+    setTimeout(applyTwelveStores, 0);
+  }
+})();
