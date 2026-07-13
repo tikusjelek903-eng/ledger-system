@@ -8,7 +8,14 @@ const seedStores = [
   { id: "toko-s", name: "TOKO S" },
   { id: "toko-d", name: "TOKO D" },
   { id: "toko-p", name: "TOKO P" },
-  { id: "toko-k", name: "TOKO K" }
+  { id: "toko-k", name: "TOKO K" },
+  { id: "toko-asc", name: "TOKO ASC" },
+  { id: "toko-sc", name: "TOKO SC" },
+  { id: "toko-lw", name: "TOKO LW" },
+  { id: "toko-mc", name: "TOKO MC" },
+  { id: "toko-nh", name: "TOKO NH" },
+  { id: "toko-dm", name: "TOKO DM" },
+  { id: "toko-wp", name: "TOKO WP" }
 ];
 
 function safeParse(key, fallback) {
@@ -404,7 +411,7 @@ transactions = transactions.map(transaction => {
 
 const meta = {
   dashboard: ["Dashboard", "Ringkasan kondisi keuangan."],
-  ledger: ["Ledger", "Kelola seluruh transaksi."],
+  ledger: ["History Transaction", "Riwayat seluruh transaksi."],
   cashin: ["Cash In", "Tambah dan pantau uang masuk."],
   cashout: ["Cash Out", "Tambah dan pantau uang keluar."],
   wallets: ["Rekening", "Kelola rekening berdasarkan pemilik, bank/platform, dan mata uang."],
@@ -3017,7 +3024,36 @@ function bindEvents() {
   window.addEventListener("resize", drawChart);
 }
 
+
+function applyHistoryTransactionLabels() {
+  const ledgerMenu = document.querySelector('[data-page="ledger"]');
+
+  if (ledgerMenu && !ledgerMenu.textContent.includes("History Transaction")) {
+    ledgerMenu.innerHTML = ledgerMenu.innerHTML.replace(
+      /Ledger/g,
+      "History Transaction"
+    );
+  }
+
+  const ledgerPage = document.getElementById("ledgerPage");
+
+  if (ledgerPage) {
+    const panelTitle = ledgerPage.querySelector(".panel-head h3");
+    const panelSubtitle = ledgerPage.querySelector(".panel-head p");
+
+    if (panelTitle) {
+      panelTitle.textContent = "History Transaction";
+    }
+
+    if (panelSubtitle) {
+      panelSubtitle.textContent =
+        "Cari, edit, dan hapus riwayat transaksi.";
+    }
+  }
+}
+
 function initialize() {
+  applyHistoryTransactionLabels();
   injectStoreStyles();
   injectReportStyles();
   ensureStoreSelector();
