@@ -3066,3 +3066,21 @@ if (document.readyState === "loading") {
 } else {
   initialize();
 }
+
+function resetHistoryDateFilter() {
+  const filterDate = document.getElementById("filterDate");
+
+  if (filterDate) {
+    filterDate.value = "";
+    filterDate.dispatchEvent(new Event("input"));
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener(
+    "DOMContentLoaded",
+    resetHistoryDateFilter
+  );
+} else {
+  resetHistoryDateFilter();
+}
